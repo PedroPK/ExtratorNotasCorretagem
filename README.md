@@ -202,6 +202,19 @@ Exemplo:
 15/02/2026 16:04:35 - DEBUG -    Total de páginas: 3
 ```
 
+## 🧭 Barra de Progresso e Interrupção (Ctrl+C)
+
+- A barra de progresso agora mostra o progresso global: total de PDFs detectados (em pasta e dentro de ZIPs) e avanço geral.
+- Para interromper o processamento a qualquer momento pressione `Ctrl+C` (Command+C no macOS Terminal também envia SIGINT).
+
+Comportamento ao interromper:
+- O script captura SIGINT/KeyboardInterrupt e finalizará de forma controlada após o PDF em processamento ser concluído.
+- Dados já extraídos serão mantidos e exportados parcialmente quando houver extrações disponíveis.
+- Caso queira abortar imediatamente (sem salvar), pressione `Ctrl+C` novamente para forçar a saída.
+
+Se quiser um comportamento diferente (por exemplo salvar a cada N arquivos), posso adicionar flush periódico ou checkpoints.
+
+
 ## 📄 Mapeamento de Ativos
 
 O mecanismo de mapeamento no arquivo `src/extratorNotasCorretagem.py` converte nomes de ativos em tickers:

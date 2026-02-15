@@ -4,6 +4,8 @@ import re
 import os
 import zipfile
 import logging
+import signal
+import sys
 from io import BytesIO
 from datetime import datetime
 from tqdm import tqdm
@@ -20,6 +22,44 @@ logging.basicConfig(
     datefmt='%d/%m/%Y %H:%M:%S'
 )
 logger = logging.getLogger(__name__)
+
+# Flag para controle de interrupção pelo usuário (Ctrl+C)
+stop_processing = False
+
+def _handle_sigint(signum, frame):
+    global stop_processing
+    stop_processing = True
+    logger.warning("⏸️ Interrupção solicitada pelo usuário (Ctrl+C). Finalizando após o arquivo atual...")
+
+# Registra o handler para SIGINT
+signal.signal(signal.SIGINT, _handle_sigint)
+
+def _count_total_pdfs(caminho):
+    """Conta o total estimado de PDFs que serão processados a partir do caminho.
+    Suporta arquivo ZIP único, pasta com PDFs e/ou ZIPs, e caminho para pasta com PDFs diretos.
+    """
+    try:
+        if caminho.endswith('.zip') or (os.path.isfile(caminho) and zipfile.is_zipfile(caminho)):
+            with zipfile.ZipFile(caminho, 'r') as z:
+                return len([f for f in z.namelist() if f.endswith('.pdf')])
+
+        if os.path.isdir(caminho):
+            total = 0
+            # PDFs diretos
+            total += len([f for f in os.listdir(caminho) if f.endswith('.pdf')])
+            # PDFs dentro de ZIPs na pasta
+            zips = [f for f in os.listdir(caminho) if f.endswith('.zip')]
+            for zf in zips:
+                try:
+                    with zipfile.ZipFile(os.path.join(caminho, zf), 'r') as z:
+                        total += len([f for f in z.namelist() if f.endswith('.pdf')])
+                except Exception:
+                    continue
+            return total
+
+        return 0
+    except Exception:
+        return 0
 
 # 1. Dicionário De-Para para mapear nomes de ativos para Tickers
 # Baseado nos exemplos dos fontes como "FIAGRO SUNO" [6] e "SUNO FIC FI" [7]
@@ -155,130 +195,98 @@ def analisar_pasta_ou_zip(caminho):
     todos_dados = []
     arquivos_processados = 0
     arquivos_erro = 0
-    
+
     try:
         logger.info("=" * 60)
         logger.info("🚀 INICIANDO PROCESSAMENTO")
         logger.info("=" * 60)
-        
+
         # Resolve caminho relativo se necessário
         if not os.path.isabs(caminho):
             caminho_resolvido = os.path.join(os.path.dirname(__file__), caminho)
             if os.path.exists(caminho_resolvido):
                 caminho = caminho_resolvido
-        
+
         # Validação do caminho fornecido
         if not os.path.exists(caminho):
             logger.error(f"✗ Caminho não encontrado: {caminho}")
             return pd.DataFrame()
-        
+
+        total_arquivos = _count_total_pdfs(caminho)
+        logger.info(f"📥 Total estimado de PDFs para processar: {total_arquivos}")
+
+        if total_arquivos == 0:
+            logger.warning("⚠️  Nenhum arquivo PDF encontrado para processar")
+            return pd.DataFrame()
+
+        # Cria a lista de tarefas (uniformiza arquivos diretos e dentro de ZIPs)
+        tarefas = []
+
         if caminho.endswith('.zip') or (os.path.isfile(caminho) and zipfile.is_zipfile(caminho)):
-            logger.info(f"📦 Modo: Arquivo ZIP - {os.path.basename(caminho)}")
-            
-            try:
-                with zipfile.ZipFile(caminho, 'r') as z:
-                    arquivos_zip = [f for f in z.namelist() if f.endswith('.pdf')]
-                    total_arquivos = len(arquivos_zip)
-                    logger.info(f"   Total de PDFs encontrados: {total_arquivos}\n")
-                    
-                    if total_arquivos == 0:
-                        logger.warning("⚠️  Nenhum arquivo PDF encontrado no ZIP")
-                    
-                    # Barra de progresso com tqdm
-                    with tqdm(total=total_arquivos, desc="📥 Processando PDFs", unit="arquivo") as pbar:
-                        for idx, filename in enumerate(arquivos_zip):
-                            try:
-                                with z.open(filename) as f:
-                                    bio = criar_bytesio_com_nome(f.read(), os.path.basename(filename))
-                                    dados = processar_pdf(bio)
-                                    todos_dados.extend(dados)
-                                    arquivos_processados += 1
-                                    pbar.update(1)
-                            except Exception as e:
-                                logger.error(f"✗ Erro ao processar {filename} do ZIP: {str(e)}")
-                                arquivos_erro += 1
-                                pbar.update(1)
-                                continue
-                            
-            except zipfile.BadZipFile:
-                logger.error(f"✗ Arquivo inválido ou corrompido: {caminho}")
-                return pd.DataFrame()
-            except Exception as e:
-                logger.error(f"✗ Erro ao abrir arquivo ZIP: {str(e)}")
-                return pd.DataFrame()
-                
+            tarefas_tipo = 'single_zip'
+            with zipfile.ZipFile(caminho, 'r') as z:
+                for f in z.namelist():
+                    if f.endswith('.pdf'):
+                        tarefas.append({'type': 'zip_entry', 'zip': caminho, 'name': f})
+
         elif os.path.isdir(caminho):
-            logger.info(f"📁 Modo: Pasta - {caminho}")
-            
-            # Procura por PDFs diretos na pasta
-            arquivos_pdf = [f for f in os.listdir(caminho) if f.endswith('.pdf')]
-            
-            # Procura por arquivos ZIP na pasta
-            arquivos_zip_na_pasta = [f for f in os.listdir(caminho) if f.endswith('.zip')]
-            
-            if arquivos_pdf:
-                logger.info(f"📄 PDFs encontrados na pasta: {len(arquivos_pdf)}\n")
-                
-                with tqdm(total=len(arquivos_pdf), desc="📥 Processando PDFs", unit="arquivo") as pbar:
-                    for idx, arquivo in enumerate(arquivos_pdf, 1):
-                        try:
-                            caminho_completo = os.path.join(caminho, arquivo)
-                            dados = processar_pdf(caminho_completo)
-                            todos_dados.extend(dados)
-                            arquivos_processados += 1
-                            pbar.update(1)
-                        except Exception as e:
-                            logger.error(f"✗ Erro ao processar {arquivo}: {str(e)}")
-                            arquivos_erro += 1
-                            pbar.update(1)
-                            continue
-            
-            elif arquivos_zip_na_pasta:
-                logger.info(f"📦 Arquivo(s) ZIP encontrado(s) na pasta: {len(arquivos_zip_na_pasta)}\n")
-                
-                with tqdm(total=len(arquivos_zip_na_pasta), desc="📦 Processando ZIPs", unit="arquivo") as pbar_zip:
-                    for idx, arquivo_zip in enumerate(arquivos_zip_na_pasta, 1):
-                        try:
-                            caminho_zip = os.path.join(caminho, arquivo_zip)
-                            
-                            with zipfile.ZipFile(caminho_zip, 'r') as z:
-                                pdfs_no_zip = [f for f in z.namelist() if f.endswith('.pdf')]
-                                logger.info(f"[{idx}/{len(arquivos_zip_na_pasta)}] {arquivo_zip}: {len(pdfs_no_zip)} PDFs")
-                                
-                                with tqdm(total=len(pdfs_no_zip), desc="   📥 PDFs deste ZIP", unit="arquivo", leave=False) as pbar:
-                                    for pdf_info in pdfs_no_zip:
-                                        try:
-                                            with z.open(pdf_info) as f:
-                                                bio = criar_bytesio_com_nome(f.read(), os.path.basename(pdf_info))
-                                                dados = processar_pdf(bio)
-                                                todos_dados.extend(dados)
-                                                arquivos_processados += 1
-                                                pbar.update(1)
-                                        except Exception as e:
-                                            logger.error(f"   ✗ Erro ao processar {pdf_info}: {str(e)}")
-                                            arquivos_erro += 1
-                                            pbar.update(1)
-                                            continue
-                            pbar_zip.update(1)
-                        except Exception as e:
-                            logger.error(f"✗ Erro ao processar ZIP {arquivo_zip}: {str(e)}")
-                            arquivos_erro += 1
-                            pbar_zip.update(1)
-                            continue
-            else:
-                logger.warning("⚠️  Nenhum arquivo PDF ou ZIP encontrado na pasta")
-                logger.info(f"📂 Conteúdo da pasta {os.path.basename(caminho)}:")
-                for item in os.listdir(caminho):
-                    item_path = os.path.join(caminho, item)
-                    if os.path.isdir(item_path):
-                        logger.info(f"   📁 {item}/")
-                    else:
-                        logger.info(f"   📄 {item}")
-                return pd.DataFrame()
+            # PDFs diretos
+            for f in os.listdir(caminho):
+                if f.endswith('.pdf'):
+                    tarefas.append({'type': 'file', 'path': os.path.join(caminho, f)})
+
+            # PDFs dentro de ZIPs na pasta
+            for zf in [f for f in os.listdir(caminho) if f.endswith('.zip')]:
+                caminho_zip = os.path.join(caminho, zf)
+                try:
+                    with zipfile.ZipFile(caminho_zip, 'r') as z:
+                        for entry in z.namelist():
+                            if entry.endswith('.pdf'):
+                                tarefas.append({'type': 'zip_entry', 'zip': caminho_zip, 'name': entry})
+                except Exception as e:
+                    logger.warning(f"⚠️  Não foi possível listar ZIP {zf}: {str(e)}")
+
         else:
             logger.error(f"✗ Caminho não é arquivo ZIP ou pasta: {caminho}")
             return pd.DataFrame()
-        
+
+        # Barra de progresso global para todos os PDFs
+        with tqdm(total=len(tarefas), desc="📥 Processando PDFs", unit="arquivo") as pbar:
+            try:
+                for tarefa in tarefas:
+                    if stop_processing:
+                        logger.warning("⏸️ Interrupção detectada — finalizando processamento após o arquivo atual.")
+                        break
+
+                    if tarefa['type'] == 'file':
+                        try:
+                            dados = processar_pdf(tarefa['path'])
+                            todos_dados.extend(dados)
+                            arquivos_processados += 1
+                        except Exception as e:
+                            logger.error(f"✗ Erro ao processar {tarefa['path']}: {str(e)}")
+                            arquivos_erro += 1
+                        finally:
+                            pbar.update(1)
+
+                    elif tarefa['type'] == 'zip_entry':
+                        try:
+                            with zipfile.ZipFile(tarefa['zip'], 'r') as z:
+                                with z.open(tarefa['name']) as f:
+                                    bio = criar_bytesio_com_nome(f.read(), os.path.basename(tarefa['name']))
+                                    dados = processar_pdf(bio)
+                                    todos_dados.extend(dados)
+                                    arquivos_processados += 1
+                        except Exception as e:
+                            logger.error(f"✗ Erro ao processar {tarefa['name']} do ZIP {os.path.basename(tarefa['zip'])}: {str(e)}")
+                            arquivos_erro += 1
+                        finally:
+                            pbar.update(1)
+
+            except KeyboardInterrupt:
+                logger.warning("⚠️  Execução interrompida pelo usuário (KeyboardInterrupt). Salvando progresso parcial...")
+                # stop_processing já será True pelo handler; fora do laço iremos exportar o parcial
+
         # Resumo final
         logger.info("\n" + "=" * 60)
         logger.info("📊 RESUMO DO PROCESSAMENTO")
@@ -288,10 +296,10 @@ def analisar_pasta_ou_zip(caminho):
             logger.warning(f"⚠️  Arquivos com erro: {arquivos_erro}")
         logger.info(f"📈 Total de registros extraídos: {len(todos_dados)}")
         logger.info("=" * 60)
-        
+
         df = pd.DataFrame(todos_dados)
         return df
-        
+
     except Exception as e:
         logger.error(f"✗ Erro inesperado durante o processamento: {str(e)}")
         logger.info("=" * 60)
