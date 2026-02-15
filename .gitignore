@@ -1,0 +1,71 @@
+# Arquivos e pastas a serem ignorados pelo Git
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+.venv/
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# PDFs e ZIPs (dados sensíveis)
+*.pdf
+*.zip
+*.PDF
+*.ZIP
+
+# Arquivos de saída
+output/
+*.csv
+*.xlsx
+*.json
+
+# Logs
+logs/
+*.log
+
+# Dados temporários
+temp/
+tmp/
+*.tmp
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+*.sublime-project
+*.sublime-workspace
