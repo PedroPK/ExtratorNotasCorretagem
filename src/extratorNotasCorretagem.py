@@ -28,8 +28,12 @@ stop_processing = False
 
 def _handle_sigint(signum, frame):
     global stop_processing
-    stop_processing = True
-    logger.warning("⏸️ Interrupção solicitada pelo usuário (Ctrl+C). Finalizando após o arquivo atual...")
+    if not stop_processing:
+        stop_processing = True
+        logger.warning("⏸️ Interrupção solicitada pelo usuário (Ctrl+C). Finalizando após o arquivo atual...")
+    else:
+        logger.error("✖ Forçando saída imediata por novo Ctrl+C")
+        sys.exit(1)
 
 # Registra o handler para SIGINT
 signal.signal(signal.SIGINT, _handle_sigint)
@@ -96,6 +100,26 @@ def limpar_ticker(texto, dicionario):
             return ticker
     return texto # Retorna o original se não mapear
 
+
+def _normalize_number(text):
+    """Converte números no formato brasileiro para ponto decimal (ex: '1.234,56' -> '1234.56')."""
+    if not text:
+        return ''
+    s = str(text).strip()
+    # Remove espaços e símbolos extras
+    s = s.replace('\xa0', '').replace(' ', '')
+    # Se já tem apenas dígitos e ponto, tenta retornar
+    # Substitui milhares (.) e decimal (,) -> '.'
+    # Primeiro, remove pontos que representam milhares
+    # Mas cuidado: se houver apenas one dot and no comma, keep it
+    if ',' in s:
+        s = s.replace('.', '')
+        s = s.replace(',', '.')
+    else:
+        # Remove any non-digit or dot
+        s = re.sub(r'[^0-9\.]', '', s)
+    return s
+
 def processar_pdf(pdf_file, senha=None):
     dados_extraidos = []
     # Tratamento inteligente do nome do arquivo para diferentes tipos de entrada
@@ -144,30 +168,97 @@ def processar_pdf(pdf_file, senha=None):
                     registros_pagina = 0
                     
                     for table in tables:
-                        # Identifica a tabela correta pelo cabeçalho
-                        if any("Especificação do título" in str(cell) for cell in table):
+                        if not table:
+                            continue
+
+                        # Detecta tabelas de negociações — geralmente 11 colunas em muitas corretoras
+                        num_cols = len(table[0]) if table and table[0] else 0
+                        table_text = ' '.join(' '.join([str(c) for c in row if c]) for row in table)
+                        is_negociacao = (num_cols == 11) or any(k in table_text for k in ['Data pregão', 'Nr. nota', 'Negociação', 'Especificação'])
+
+                        if not is_negociacao:
+                            # Heurística fallback: tente encontrar linhas que contenham quantidade+preço
                             for row in table[1:]:
-                                # Filtra linhas vazias ou de resumo
-                                if not row or len(row) < 5 or "Resumo" in str(row):
+                                if not row or all(not (str(c).strip()) for c in row):
                                     continue
-                                
+
                                 try:
-                                    # Mapeamento de colunas baseado nos fontes [1, 5, 11]
-                                    # Nota: A posição pode variar se o PDF tiver colunas vazias
-                                    operacao = "C" if "C" in str(row[3]) else "V"
-                                    especificacao = str(row[12])
-                                    quantidade = str(row[2]).split('\n')[-1] # Lida com quebras [2]
-                                    preco = str(row[13] if row[13] else row[14]).split('\n')
-                                    
+                                    cells = [(c or '').strip() for c in row]
+                                    # Procura por padrões de número (quantidade/price)
+                                    possible_qty = None
+                                    possible_price = None
+                                    for c in cells:
+                                        if re.search(r'\d+[\.,]\d+', c):
+                                            # assume price-like
+                                            if not possible_price:
+                                                possible_price = _normalize_number(c)
+                                        elif re.search(r'^\d+$', c.replace('.', '').replace(',', '')):
+                                            if not possible_qty:
+                                                possible_qty = _normalize_number(c)
+
+                                    if not possible_qty and not possible_price:
+                                        continue
+
+                                    # heurística para ativo: primeira célula textual longa
+                                    ativo = ''
+                                    for c in cells:
+                                        if c and not re.search(r'^[\d\.,\-\s]+$', c):
+                                            ativo = c
+                                            break
+
+                                    operacao = ''
+                                    for c in cells:
+                                        if ' C ' in f' {c} '.upper() or c.strip().upper() == 'C' or c.strip().upper() == 'V':
+                                            operacao = 'C' if 'C' in c.upper() else 'V' if 'V' in c.upper() else ''
+                                            if operacao:
+                                                break
+
+                                    dados_extraidos.append({
+                                        "Data": data_pregao,
+                                        "Ticker": limpar_ticker(ativo, DE_PARA_TICKERS),
+                                        "Operação": operacao,
+                                        "Quantidade": possible_qty or '',
+                                        "Preço": possible_price or ''
+                                    })
+                                    registros_pagina += 1
+                                except Exception:
+                                    continue
+                            # fim heurística fallback
+                        else:
+                            for row in table[1:]:
+                                # Filtra linhas vazias
+                                if not row or all(not (str(c).strip()) for c in row):
+                                    continue
+
+                                try:
+                                    cells = [(c or '').strip() for c in row]
+
+                                    # Mapeamento comum observado em amostras:
+                                    # col[2] = operação (C/V), col[5] = especificação (nome do ativo), col[7] = quantidade, col[8] = preço
+                                    operacao = ''
+                                    if len(cells) > 2 and cells[2]:
+                                        operacao = 'C' if 'C' in cells[2].upper() else ('V' if 'V' in cells[2].upper() else '')
+
+                                    especificacao = cells[5] if len(cells) > 5 else ''
+                                    quantidade_raw = cells[7] if len(cells) > 7 else ''
+                                    preco_raw = cells[8] if len(cells) > 8 else ''
+
+                                    quantidade = _normalize_number(quantidade_raw)
+                                    preco = _normalize_number(preco_raw)
+
+                                    # Se não houver quantidade nem preço, provavelmente não é linha de negócio
+                                    if not quantidade and not preco:
+                                        continue
+
                                     dados_extraidos.append({
                                         "Data": data_pregao,
                                         "Ticker": limpar_ticker(especificacao, DE_PARA_TICKERS),
                                         "Operação": operacao,
                                         "Quantidade": quantidade,
-                                        "Preço": preco.replace('.', '').replace(',', '.')
+                                        "Preço": preco
                                     })
                                     registros_pagina += 1
-                                except (IndexError, ValueError) as e:
+                                except Exception as e:
                                     logger.warning(f"   ⚠️  Erro ao extrair linha na página {num_pagina}: {str(e)}")
                                     continue
                     
