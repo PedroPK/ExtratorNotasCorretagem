@@ -1,8 +1,27 @@
 # 📊 Extrator Notas Corretagem
 
-Um script Python para extrair dados de notas de negociação de PDFs de educação da Bolsa de Valores Brasileira.
+Um script Python para extrair dados de notas de negociação de PDFs da Bolsa de Valores Brasileira (B3).
 
-## ✨ Novo: Filtro de Ano 🎯
+## 🚀 Quick Start para Novos Usuários
+
+**Novo por aqui?** Leia o **[QUICKSTART.md](QUICKSTART.md)** para instruções passo a passo de instalação e execução!
+
+[![Quick Start](https://img.shields.io/badge/NEW%20USER-START%20HERE-blue?style=for-the-badge)](QUICKSTART.md)
+
+## ✨ Principais Características
+
+- **Extração automática** de notas de negociação de PDFs
+- **Filtro de ano** para processar seletivamente por ano do arquivo
+- **Suporte a múltiplos formatos** (pasta de PDFs, arquivos ZIP, PDFs individuais)
+- **Tratamento de PDFs protegidos** com senha
+- **Progresso visual** com barra de progresso em tempo real
+- **Mapeamento inteligente de ativos** para tickers B3
+- **Log detalhado** com arquivo persistente
+- **Exportação em múltiplos formatos** (CSV, Excel, JSON)
+- **CLI moderno** com argumentos de linha de comando
+- **Estrutura organizada** com configurações em `resouces/`
+
+## ✨ Filtro de Ano 🎯
 
 Agora você pode processar seletivamente apenas PDFs de um ano específico!
 
@@ -19,70 +38,50 @@ python3 src/extratorNotasCorretagem.py -y 2026
 
 Para mais detalhes, veja [docs/YEAR_FILTER.md](docs/YEAR_FILTER.md)
 
-## 🎯 Funcionalidades
-
-- **Extração automática** de notas de negociação de PDFs
-- **Filtro de ano** para processar seletivamente por ano do arquivo
-- **Suporte a múltiplos formatos** (pasta de PDFs, arquivos ZIP, PDFs individuais)
-- **Tratamento de PDFs protegidos** com senha
-- **Progresso visual** com barra de progresso
-- **Mapeamento de ativos** para tickers B3
-- **Log detalhado** de operações
-- **Exportação em múltiplos formatos** (CSV, Excel, JSON)
-- **CLI moderno** com argumentos de linha de comando
-
 ## 📋 Requisitos
 
 - Python 3.8+
 - pip (gerenciador de pacotes Python)
 
-## 🚀 Instalação
+## 🚀 Instalação Extra Rápida
 
-### 1. Clone o repositório
+Para instruções completas, veja **[QUICKSTART.md](QUICKSTART.md)**
+
 ```bash
-git clone https://github.com/seu-usuario/ExtratorNotasCorretagem.git
+# 1. Clone
+git clone <repo-url>
 cd ExtratorNotasCorretagem
-```
 
-### 2. Crie um ambiente virtual
-
-**macOS/Linux:**
-```bash
+# 2. Ambiente virtual
 python3 -m venv .venv
-source .venv/bin/activate
-```
+source .venv/bin/activate  # macOS/Linux
+# .venv\Scripts\activate   # Windows
 
-**Windows:**
-```bash
-python -m venv .venv
-.venv\Scripts\activate
-```
+# 3. Dependências
+pip install -r resouces/requirements.txt
 
-### 3. Instale as dependências
-```bash
-pip install -r requirements.txt
+# 4. Execute
+python3 src/extratorNotasCorretagem.py
 ```
 
 ## ⚙️ Configuração
 
-### application.properties
-
-O arquivo `application.properties` contém as configurações da aplicação:
+O arquivo **`resouces/application.properties`** contém todas as configurações:
 
 ```properties
-# Senha para PDFs protegidos (deixe vazio se não houver)
-pdf.password=sua_senha_aqui
+# Senha para PDFs protegidos
+pdf.password=454
 
-# Nível de log (DEBUG, INFO, WARNING, ERROR)
+# Nível de log (DEBUG, INFO, WARNING)
 logging.level=INFO
 
-# Formato de saída (csv, excel, json)
+# Formato de saída (csv, xlsx, json)
 output.format=csv
 
-# Pasta de entrada com os PDFs
+# Entrada de PDFs
 input.folder=../resouces/inputNotasCorretagem
 
-# Pasta de saída dos dados extraídos (agora dentro de resouces)
+# Saída de dados
 output.folder=../resouces/output
 
 # Pasta de logs
@@ -95,18 +94,23 @@ logs.folder=../resouces/output/logs
 ExtratorNotasCorretagem/
 ├── src/
 │   ├── extratorNotasCorretagem.py      # Script principal
-│   ├── config.py                        # Gerenciador de configuração
-│   └── extracao_YYYYMMDD_HHMMSS.log    # Arquivos de log (criados durante execução)
-├── resouces/                            # Pasta de entrada e saída
-│   ├── inputNotasCorretagem/            # PDFs/ZIPs de entrada
-│   └── output/                          # Dados extraídos
-│       ├── logs/                        # Arquivos de log
-│       └── dados_extraidos_*.csv        # CSVs gerados
-├── docs/                                # Documentação
-├── application.properties               # Arquivo de configuração
-├── requirements.txt                     # Dependências Python
-├── .gitignore                          # Arquivos ignorados pelo Git
-└── README.md                            # Este arquivo
+│   └── config.py                        # Gerenciador de configuração
+├── resouces/                            # ✨ Todos os recursos aqui
+│   ├── application.properties           # ⚙️ Configuração
+│   ├── requirements.txt                 # 📦 Dependências
+│   ├── inputNotasCorretagem/            # 📥 PDFs/ZIPs de entrada
+│   └── output/
+│       ├── dados_extraidos_*.csv        # 📊 CSVs gerados
+│       └── logs/
+│           └── extracao_*.log           # 📋 Logs detalhados
+├── docs/                                # 📚 Documentação
+│   ├── YEAR_FILTER.md
+│   ├── IMPLEMENTATION_SUMMARY.md
+│   └── ANALISE_ESTRUTURA_PDFS.md
+├── QUICKSTART.md                        # 🚀 Guia rápido (comece aqui!)
+├── README.md                            # Este arquivo
+├── .gitignore
+└── .git
 ```
 
 ## 💻 Como Usar
@@ -114,11 +118,10 @@ ExtratorNotasCorretagem/
 ### Opção 1: Processar TODOS os PDFs
 
 ```bash
-cd src
-python3 extratorNotasCorretagem.py
+python3 src/extratorNotasCorretagem.py
 ```
 
-### Opção 2: Processar apenas PDFs de um ano específico (NOVO!)
+### Opção 2: Processar apenas PDFs de um ano específico
 
 ```bash
 # Usar --year seguido do ano
