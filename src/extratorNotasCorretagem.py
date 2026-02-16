@@ -6,8 +6,10 @@ import zipfile
 import logging
 import signal
 import sys
+import argparse
 from io import BytesIO
 from datetime import datetime
+from typing import Dict, List, Optional
 from tqdm import tqdm
 from config import get_config
 
@@ -214,6 +216,46 @@ def _extract_ticker_from_cells(cells):
     # Se não encontrou padrão, retorna None (linha provavelmente não é válida)
     return None
 
+def _extract_year_from_filename(filename: str) -> Optional[int]:
+    """Extrai o ano do nome do arquivo PDF.
+    
+    Procura por padrões como:
+    - Clear 2026 01 Janeiro
+    - Clear 2025 12 Dezembro
+    - Arquivo_2024_01_Janeiro
+    
+    Args:
+        filename: Nome do arquivo PDF
+        
+    Returns:
+        Ano extraído como inteiro, ou None se não encontrar
+    """
+    # Padrão: 4 dígitos que representam um ano (entre 1900 e 2100)
+    match = re.search(r'\b(19|20)\d{2}\b', filename)
+    if match:
+        return int(match.group(0))
+    return None
+
+def _should_process_file(filename: str, target_year: Optional[int]) -> bool:
+    """Verifica se o arquivo deve ser processado baseado no filtro de ano.
+    
+    Args:
+        filename: Nome do arquivo
+        target_year: Ano desejado (None = processar todos)
+        
+    Returns:
+        True se deve processar, False caso contrário
+    """
+    if target_year is None:
+        return True
+    
+    file_year = _extract_year_from_filename(filename)
+    if file_year is None:
+        logger.warning(f"⚠️  Não foi possível extrair ano de: {filename}")
+        return False
+    
+    return file_year == target_year
+
 
 def processar_pdf(pdf_file, senha=None):
     dados_extraidos = []
@@ -393,14 +435,17 @@ def processar_pdf(pdf_file, senha=None):
     
     return dados_extraidos
 
-def analisar_pasta_ou_zip(caminho):
+def analisar_pasta_ou_zip(caminho, year_filter: Optional[int] = None):
     todos_dados = []
     arquivos_processados = 0
     arquivos_erro = 0
+    arquivos_ignorados = 0
 
     try:
         logger.info("=" * 60)
         logger.info("🚀 INICIANDO PROCESSAMENTO")
+        if year_filter is not None:
+            logger.info(f"🔍 Filtro de ano ativo: {year_filter}")
         logger.info("=" * 60)
 
         # Resolve caminho relativo se necessário
@@ -429,13 +474,21 @@ def analisar_pasta_ou_zip(caminho):
             with zipfile.ZipFile(caminho, 'r') as z:
                 for f in z.namelist():
                     if f.endswith('.pdf'):
-                        tarefas.append({'type': 'zip_entry', 'zip': caminho, 'name': f})
+                        # Aplica filtro de ano se especificado
+                        if _should_process_file(f, year_filter):
+                            tarefas.append({'type': 'zip_entry', 'zip': caminho, 'name': f})
+                        else:
+                            arquivos_ignorados += 1
 
         elif os.path.isdir(caminho):
             # PDFs diretos
             for f in os.listdir(caminho):
                 if f.endswith('.pdf'):
-                    tarefas.append({'type': 'file', 'path': os.path.join(caminho, f)})
+                    # Aplica filtro de ano se especificado
+                    if _should_process_file(f, year_filter):
+                        tarefas.append({'type': 'file', 'path': os.path.join(caminho, f)})
+                    else:
+                        arquivos_ignorados += 1
 
             # PDFs dentro de ZIPs na pasta
             for zf in [f for f in os.listdir(caminho) if f.endswith('.zip')]:
@@ -444,7 +497,11 @@ def analisar_pasta_ou_zip(caminho):
                     with zipfile.ZipFile(caminho_zip, 'r') as z:
                         for entry in z.namelist():
                             if entry.endswith('.pdf'):
-                                tarefas.append({'type': 'zip_entry', 'zip': caminho_zip, 'name': entry})
+                                # Aplica filtro de ano se especificado
+                                if _should_process_file(entry, year_filter):
+                                    tarefas.append({'type': 'zip_entry', 'zip': caminho_zip, 'name': entry})
+                                else:
+                                    arquivos_ignorados += 1
                 except Exception as e:
                     logger.warning(f"⚠️  Não foi possível listar ZIP {zf}: {str(e)}")
 
@@ -496,6 +553,8 @@ def analisar_pasta_ou_zip(caminho):
         logger.info(f"✓ Arquivos processados com sucesso: {arquivos_processados}")
         if arquivos_erro > 0:
             logger.warning(f"⚠️  Arquivos com erro: {arquivos_erro}")
+        if arquivos_ignorados > 0:
+            logger.info(f"⏭️ Arquivos ignorados (fora do filtro de ano): {arquivos_ignorados}")
         logger.info(f"📈 Total de registros extraídos: {len(todos_dados)}")
         logger.info("=" * 60)
 
@@ -574,6 +633,27 @@ def exportar_dados(df, formato=None):
 
 
 if __name__ == "__main__":
+    # Cria parser de argumentos de linha de comando
+    parser = argparse.ArgumentParser(
+        description="Extrator de Notas de Negociação da Clear Corretora",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Exemplos de uso:
+  python3 extratorNotasCorretagem.py                    # Processa todos os PDFs
+  python3 extratorNotasCorretagem.py --year 2024        # Processa apenas PDFs de 2024
+  python3 extratorNotasCorretagem.py -y 2026            # Processa apenas PDFs de 2026
+        """
+    )
+    parser.add_argument(
+        '--year', '-y',
+        type=int,
+        default=None,
+        help='Filtrar por ano (extrair apenas PDFs com esse ano no nome do arquivo)'
+    )
+    
+    args = parser.parse_args()
+    year_filter = args.year
+    
     # Caminho da pasta com os arquivos de entrada
     caminho_pasta = config.get_input_folder()
     
@@ -592,7 +672,7 @@ if __name__ == "__main__":
         logger.info("   3. Coloque seus arquivos PDF ou ZIP dentro dessa pasta")
     else:
         logger.info("✓ Pasta encontrada. Processando...\n")
-        df = analisar_pasta_ou_zip(caminho_absoluto)
+        df = analisar_pasta_ou_zip(caminho_absoluto, year_filter=year_filter)
         
         if not df.empty:
             logger.info(f"\n📋 Primeiras linhas dos dados extraídos:")
