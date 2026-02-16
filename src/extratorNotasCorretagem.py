@@ -18,10 +18,25 @@ config = get_config()
 
 # Configuração de Logging
 logging_level = config.get_logging_level()
+logs_folder = config.resolve_path(config.get_logs_folder())
+
+# Criar pasta de logs se não existir
+if not os.path.exists(logs_folder):
+    os.makedirs(logs_folder)
+
+# Gera nome do arquivo de log com timestamp
+log_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+log_file = os.path.join(logs_folder, f"extracao_{log_timestamp}.log")
+
+# Configurar logging com ambos console e arquivo
 logging.basicConfig(
     level=getattr(logging, logging_level),
     format='%(asctime)s - %(levelname)s - %(message)s',
-    datefmt='%d/%m/%Y %H:%M:%S'
+    datefmt='%d/%m/%Y %H:%M:%S',
+    handlers=[
+        logging.FileHandler(log_file, encoding='utf-8'),
+        logging.StreamHandler()
+    ]
 )
 logger = logging.getLogger(__name__)
 

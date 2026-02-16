@@ -15,7 +15,8 @@ class ConfigManager:
         'logging.level': 'INFO',
         'output.format': 'csv',
         'input.folder': '../resouces/inputNotasCorretagem',
-        'output.folder': '../output'
+        'output.folder': '../resouces/output',
+        'logs.folder': '../resouces/output/logs'
     }
     
     def __init__(self, config_file='application.properties'):
@@ -75,6 +76,10 @@ class ConfigManager:
     def get_output_folder(self):
         """Obtém a pasta de saída"""
         return self.get('output.folder')
+    
+    def get_logs_folder(self):
+        """Obtém a pasta de logs"""
+        return self.get('logs.folder')
     
     def resolve_path(self, relative_path):
         """
