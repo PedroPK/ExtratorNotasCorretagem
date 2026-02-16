@@ -120,6 +120,101 @@ def _normalize_number(text):
         s = re.sub(r'[^0-9\.]', '', s)
     return s
 
+
+def _is_likely_header(cells):
+    """Verifica se a linha parece ser um cabeçalho (nomes de colunas)."""
+    if not cells:
+        return False
+    
+    # Palavras típicas de cabeçalhos
+    header_keywords = ['data', 'ativo', 'especif', 'qtd', 'preço', 'valor', 'operação', 'nota', 'corretora']
+    header_text = ' '.join([str(c).lower() for c in cells if c])
+    
+    # Se muitas células têm pontos/dois-pontos, pode ser cabeçalho
+    if header_text.count(':') > 3:
+        return True
+    
+    # Se contém múltiplas palavras de cabeçalho
+    count = sum(1 for kw in header_keywords if kw in header_text)
+    return count >= 2
+
+def _is_valid_data_row(cells, is_negotiation_table=False):
+    """Verifica se a linha parece ser um registro de negociação e não cabeçalho/resumo/footer.
+    
+    Args:
+        cells: List of cell values from the row
+        is_negotiation_table: True if this is an 11-column negotiation table (less strict validation)
+    """
+    if not cells or len(cells) < 2:
+        return False
+    
+    # Rejeita se parece ser cabeçalho
+    if _is_likely_header(cells):
+        return False
+    
+    # Palavras-chave que indicam linhas que NÃO são negociações (headers, footers, summaries)
+    skip_keywords = [
+        'resumo', 'total', 'debêntures', 'vendas', 'compras', 'opções', 'termo',
+        'taxa', 'emolumentos', 'transf', 'ativos', 'custodiante', 'clearing',
+        'especificações', 'bovespa', 'cblc', 'cliente', 'código', 'assessor',
+        'participante', 'folha', 'data pregão', 'negociação', 'c.p.f', 'cnpj',
+        'valor das oper', 'valor líquido', 'qualificado', 'nota de negociação',
+        'impostos', 'i.r.r.f', 'execução', 'custódia', 'bolsa', 'operacional',
+        'custos', 'agente', 'qualificado', 'especificações diversas',
+        'coluna q', 'liquidação', 'agente do qualificado', '(*)', 'observações',
+        'líquido para',  # Settlement rows, not transactions
+        'conta', 'saldo', 'c.m.c', 'participante destino'  # Account/routing info
+    ]
+    
+    # Para tabelas de negociação (11 colunas), validação menos rigorosa
+    if is_negotiation_table:
+        # Apenas rejeita se tem palavras-chave muito óbvias (menos a de "bovespa")
+        strict_skip = [
+            'resumo', 'total', 'debêntures', 'taxa', 'emolumentos', 'custos',
+            'líquido para', 'client', 'código', 'c.p.f', 'cnpj', 'observações',
+            '(*)', 'saldo', 'conta'
+        ]
+        row_text = ' '.join(cells).upper()
+        for keyword in strict_skip:
+            if keyword.upper() in row_text:
+                return False
+    else:
+        # Para outras tabelas, validação rigorosa
+        row_text = ' '.join(cells).upper()
+        for keyword in skip_keywords:
+            if keyword.upper() in row_text:
+                return False
+    
+    # Uma linha válida deve ter pelo menos um número (quantidade ou preço)
+    has_number = False
+    for cell in cells:
+        # Aceita tanto números decimais quanto inteiros
+        if re.search(r'\d', str(cell)):
+            has_number = True
+            break
+    
+    return has_number
+
+
+def _extract_ticker_from_cells(cells):
+    """Extrai ticker da linha, buscando padrão B3 ou nome de ativo conhecido."""
+    for cell in cells:
+        cell_str = str(cell).strip()
+        
+        # Tenta padrão ticker B3 (4 letras + 2 dígitos)
+        match = re.search(r'[A-Z]{4}\d{2}', cell_str)
+        if match:
+            return match.group(0)
+        
+        # Tenta encontrar nome conhecido de ativo
+        for nome, ticker in DE_PARA_TICKERS.items():
+            if nome.upper() in cell_str.upper():
+                return ticker
+    
+    # Se não encontrou padrão, retorna None (linha provavelmente não é válida)
+    return None
+
+
 def processar_pdf(pdf_file, senha=None):
     dados_extraidos = []
     # Tratamento inteligente do nome do arquivo para diferentes tipos de entrada
@@ -178,12 +273,23 @@ def processar_pdf(pdf_file, senha=None):
 
                         if not is_negociacao:
                             # Heurística fallback: tente encontrar linhas que contenham quantidade+preço
+                            # MAS USANDO A MESMA VALIDAÇÃO que acima
                             for row in table[1:]:
                                 if not row or all(not (str(c).strip()) for c in row):
                                     continue
 
+                                cells = [(c or '').strip() for c in row]
+                                
+                                # APLICAR VALIDAÇÃO: recusa headers/footers/summaries
+                                if not _is_valid_data_row(cells, is_negotiation_table=False):
+                                    continue
+                                
                                 try:
-                                    cells = [(c or '').strip() for c in row]
+                                    # Verifica se é uma linha válida de negociação
+                                    ticker = _extract_ticker_from_cells(cells)
+                                    if not ticker:
+                                        continue  # Não conseguiu extrair ticker válido
+
                                     # Procura por padrões de número (quantidade/price)
                                     possible_qty = None
                                     possible_price = None
@@ -199,13 +305,6 @@ def processar_pdf(pdf_file, senha=None):
                                     if not possible_qty and not possible_price:
                                         continue
 
-                                    # heurística para ativo: primeira célula textual longa
-                                    ativo = ''
-                                    for c in cells:
-                                        if c and not re.search(r'^[\d\.,\-\s]+$', c):
-                                            ativo = c
-                                            break
-
                                     operacao = ''
                                     for c in cells:
                                         if ' C ' in f' {c} '.upper() or c.strip().upper() == 'C' or c.strip().upper() == 'V':
@@ -215,7 +314,7 @@ def processar_pdf(pdf_file, senha=None):
 
                                     dados_extraidos.append({
                                         "Data": data_pregao,
-                                        "Ticker": limpar_ticker(ativo, DE_PARA_TICKERS),
+                                        "Ticker": ticker,
                                         "Operação": operacao,
                                         "Quantidade": possible_qty or '',
                                         "Preço": possible_price or ''
@@ -225,21 +324,33 @@ def processar_pdf(pdf_file, senha=None):
                                     continue
                             # fim heurística fallback
                         else:
-                            for row in table[1:]:
+                            # Para tabelas de negociação, processa TODAS as linhas (não pula a primeira)
+                            # A detecção de cabeçalho é feita dentro de _is_valid_data_row()
+                            start_row = 0 if is_negociacao else 1
+                            for row in table[start_row:]:
                                 # Filtra linhas vazias
                                 if not row or all(not (str(c).strip()) for c in row):
                                     continue
 
-                                try:
-                                    cells = [(c or '').strip() for c in row]
+                                cells = [(c or '').strip() for c in row]
+                                
+                                # Verifica se é uma linha válida de negociação
+                                if not _is_valid_data_row(cells, is_negotiation_table=True):
+                                    continue
 
+                                try:
                                     # Mapeamento comum observado em amostras:
                                     # col[2] = operação (C/V), col[5] = especificação (nome do ativo), col[7] = quantidade, col[8] = preço
+                                    
+                                    # Extrai ticker de forma robusta
+                                    ticker = _extract_ticker_from_cells(cells)
+                                    if not ticker:
+                                        continue  # Não conseguiu extrair ticker válido
+                                    
                                     operacao = ''
                                     if len(cells) > 2 and cells[2]:
                                         operacao = 'C' if 'C' in cells[2].upper() else ('V' if 'V' in cells[2].upper() else '')
 
-                                    especificacao = cells[5] if len(cells) > 5 else ''
                                     quantidade_raw = cells[7] if len(cells) > 7 else ''
                                     preco_raw = cells[8] if len(cells) > 8 else ''
 
@@ -252,14 +363,14 @@ def processar_pdf(pdf_file, senha=None):
 
                                     dados_extraidos.append({
                                         "Data": data_pregao,
-                                        "Ticker": limpar_ticker(especificacao, DE_PARA_TICKERS),
+                                        "Ticker": ticker,
                                         "Operação": operacao,
                                         "Quantidade": quantidade,
                                         "Preço": preco
                                     })
                                     registros_pagina += 1
                                 except Exception as e:
-                                    logger.warning(f"   ⚠️  Erro ao extrair linha na página {num_pagina}: {str(e)}")
+                                    logger.debug(f"   ⚠️  Erro ao extrair linha: {str(e)}")
                                     continue
                     
                     if registros_pagina > 0:
