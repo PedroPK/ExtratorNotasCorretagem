@@ -7,6 +7,6 @@
 7. Corrigir Tickers de Ações com o De-Para
 8. Mover a pasta Outputs para dentro de Resources
 9. Criar arquivo De-Para dentro de Resources (tickerMapping.properties)
-10. Mover logs para a pasta Resources
+10. Mover logs para a pasta Resources - DONE
 11. Permitir o processamento de uma quantidade específica de arquivos
 12. Escolher que anos desejamos processar. - DONE 

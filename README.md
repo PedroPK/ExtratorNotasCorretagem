@@ -315,6 +315,47 @@ DE_PARA_TICKERS = {
 }
 ```
 
+### Como gerar/atualizar `resouces/tickerMapping.properties`
+
+Este projeto inclui um utilitário para gerar e atualizar o arquivo de mapeamento de ativos para tickers B3.
+
+- Arquivo gerado/atualizado: `resouces/tickerMapping.properties`
+- Script: `src/gerar_ticker_mapping.py`
+
+O script atualmente executa um conjunto de exemplos integrados e salva/atualiza o arquivo de mapeamento.
+Para gerar o arquivo (modo rápido):
+
+```bash
+# Executa o gerador (usa exemplos embutidos e atualiza resouces/tickerMapping.properties)
+python3 src/gerar_ticker_mapping.py
+```
+
+Saída esperada:
+- Mensagens no console indicando os ativos processados
+- Arquivo `resouces/tickerMapping.properties` criado/atualizado
+
+Observações e próximos passos:
+- Para gerar a partir das descrições reais extraídas dos PDFs (integração completa), o script possui um placeholder `--from-pdf` que será usado quando integrado com o extractor principal. No momento, ele não extrai automaticamente as descrições dos PDFs — você pode executar o script e fornecer uma lista de descrições no próprio arquivo ou melhorar o script para ler as saídas do `extratorNotasCorretagem.py`.
+- Você pode editar manualmente `resouces/tickerMapping.properties` para corrigir ou adicionar mapeamentos.
+
+Formato do arquivo `resouces/tickerMapping.properties`:
+
+```
+# Comentários começam com #
+# Formato: DESCRICAO_DO_ATIVO=TICKER
+Embraer ON NM=EMBR3
+Vale ON NM=VALE3
+Cosan ON NM=CSAN3
+```
+
+Após atualizar o `tickerMapping.properties`, re-execute o extractor para que as novas regras sejam aplicadas:
+
+```bash
+python3 src/extratorNotasCorretagem.py --year 2018
+```
+
+Se quiser que eu integre o modo `--from-pdf` diretamente (o script extrairia automaticamente as descrições dos PDFs e geraria o mapeamento), diga e eu implemento essa integração.
+
 ## 🤝 Contribuindo
 
 1. Faça um fork do projeto

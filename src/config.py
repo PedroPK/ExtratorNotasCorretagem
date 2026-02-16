@@ -81,6 +81,39 @@ class ConfigManager:
         """Obtém a pasta de logs"""
         return self.get('logs.folder')
     
+    def get_ticker_mapping(self) -> dict:
+        """
+        Carrega mapeamento de descrições de ativos para tickers B3
+        
+        Returns:
+            Dict com mapeamento {descrição: ticker}
+        """
+        mapping = {}
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.dirname(script_dir)
+        
+        # Tenta em resouces/
+        mapping_file = os.path.join(project_root, 'resouces', 'tickerMapping.properties')
+        
+        if not os.path.exists(mapping_file):
+            # Compatibilidade: tenta na raiz
+            mapping_file = os.path.join(project_root, 'tickerMapping.properties')
+        
+        if os.path.exists(mapping_file):
+            try:
+                with open(mapping_file, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line or line.startswith('#'):
+                            continue
+                        if '=' in line:
+                            desc, ticker = line.split('=', 1)
+                            mapping[desc.strip()] = ticker.strip()
+            except Exception as e:
+                print(f"⚠️  Erro ao carregar tickerMapping.properties: {str(e)}")
+        
+        return mapping
+    
     def resolve_path(self, relative_path):
         """
         Resolve um caminho relativo para absoluto

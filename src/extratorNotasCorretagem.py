@@ -213,8 +213,15 @@ def _is_valid_data_row(cells, is_negotiation_table=False):
     return has_number
 
 
-def _extract_ticker_from_cells(cells):
-    """Extrai ticker da linha, buscando padrão B3 ou nome de ativo conhecido."""
+def _extract_ticker_from_cells(cells, ticker_mapping=None):
+    """
+    Extrai ticker da linha, buscando padrão B3 ou nome de ativo conhecido.
+    
+    Estratégia:
+    1. Procura por padrão ticker B3 (4 letras + 2 dígitos)
+    2. Busca em DE_PARA_TICKERS (hardcoded)
+    3. Busca em ticker_mapping (carregado de resouces/tickerMapping.properties)
+    """
     for cell in cells:
         cell_str = str(cell).strip()
         
@@ -223,10 +230,16 @@ def _extract_ticker_from_cells(cells):
         if match:
             return match.group(0)
         
-        # Tenta encontrar nome conhecido de ativo
+        # Tenta encontrar nome conhecido de ativo (DE_PARA hardcoded)
         for nome, ticker in DE_PARA_TICKERS.items():
             if nome.upper() in cell_str.upper():
                 return ticker
+        
+        # Tenta ticker_mapping (carregado de arquivo de configuração)
+        if ticker_mapping:
+            for nome, ticker in ticker_mapping.items():
+                if nome.upper() in cell_str.upper():
+                    return ticker
     
     # Se não encontrou padrão, retorna None (linha provavelmente não é válida)
     return None
@@ -274,6 +287,10 @@ def _should_process_file(filename: str, target_year: Optional[int]) -> bool:
 
 def processar_pdf(pdf_file, senha=None):
     dados_extraidos = []
+    
+    # Carrega mapeamento de tickers do arquivo de configuração
+    ticker_mapping = config.get_ticker_mapping()
+    
     # Tratamento inteligente do nome do arquivo para diferentes tipos de entrada
     if isinstance(pdf_file, str):
         arquivo_nome = os.path.basename(pdf_file)
@@ -343,7 +360,7 @@ def processar_pdf(pdf_file, senha=None):
                                 
                                 try:
                                     # Verifica se é uma linha válida de negociação
-                                    ticker = _extract_ticker_from_cells(cells)
+                                    ticker = _extract_ticker_from_cells(cells, ticker_mapping)
                                     if not ticker:
                                         continue  # Não conseguiu extrair ticker válido
 
@@ -400,7 +417,7 @@ def processar_pdf(pdf_file, senha=None):
                                     # col[2] = operação (C/V), col[5] = especificação (nome do ativo), col[7] = quantidade, col[8] = preço
                                     
                                     # Extrai ticker de forma robusta
-                                    ticker = _extract_ticker_from_cells(cells)
+                                    ticker = _extract_ticker_from_cells(cells, ticker_mapping)
                                     if not ticker:
                                         continue  # Não conseguiu extrair ticker válido
                                     
