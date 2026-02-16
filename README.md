@@ -2,15 +2,34 @@
 
 Um script Python para extrair dados de notas de negociação de PDFs de educação da Bolsa de Valores Brasileira.
 
+## ✨ Novo: Filtro de Ano 🎯
+
+Agora você pode processar seletivamente apenas PDFs de um ano específico!
+
+```bash
+# Processar todos os PDFs
+python3 src/extratorNotasCorretagem.py
+
+# Processar apenas PDFs de 2024
+python3 src/extratorNotasCorretagem.py --year 2024
+
+# Processar apenas PDFs de 2026 (formato curto)
+python3 src/extratorNotasCorretagem.py -y 2026
+```
+
+Para mais detalhes, veja [docs/YEAR_FILTER.md](docs/YEAR_FILTER.md)
+
 ## 🎯 Funcionalidades
 
 - **Extração automática** de notas de negociação de PDFs
+- **Filtro de ano** para processar seletivamente por ano do arquivo
 - **Suporte a múltiplos formatos** (pasta de PDFs, arquivos ZIP, PDFs individuais)
 - **Tratamento de PDFs protegidos** com senha
 - **Progresso visual** com barra de progresso
 - **Mapeamento de ativos** para tickers B3
 - **Log detalhado** de operações
 - **Exportação em múltiplos formatos** (CSV, Excel, JSON)
+- **CLI moderno** com argumentos de linha de comando
 
 ## 📋 Requisitos
 
@@ -84,7 +103,42 @@ ExtratorNotasCorretagem/
 
 ## 💻 Como Usar
 
-### 1. Adicione seus PDFs
+### Opção 1: Processar TODOS os PDFs
+
+```bash
+cd src
+python3 extratorNotasCorretagem.py
+```
+
+### Opção 2: Processar apenas PDFs de um ano específico (NOVO!)
+
+```bash
+# Usar --year seguido do ano
+python3 extratorNotasCorretagem.py --year 2024
+
+# Ou usar o atalho -y
+python3 extratorNotasCorretagem.py -y 2026
+```
+
+**Requisitos para o filtro de ano:**
+- O arquivo PDF **deve conter o ano** no nome
+- Padrões válidos: "Clear **2024** 04 Abril.pdf", "Arquivo_**2026**_janeiro.pdf"
+- O filtro detecta automaticamente anos entre 1900-2099
+
+**Exemplo de resultado com filtro:**
+```bash
+$ python3 extratorNotasCorretagem.py --year 2024
+🔍 Filtro de ano ativo: 2024
+📥 Total estimado de PDFs para processar: 92
+📥 Processando PDFs: 0/12  # Apenas 12 PDFs de 2024 encontrados
+✓ Arquivos processados com sucesso: 12
+⏭️ Arquivos ignorados (fora do filtro de ano): 80
+📈 Total de registros extraídos: 245
+```
+
+Para mais detalhes sobre o filtro, veja [docs/YEAR_FILTER.md](docs/YEAR_FILTER.md)
+
+### Adicione seus PDFs
 
 Coloque seus arquivos PDF ou ZIP na pasta `resouces/inputNotasCorretagem/`
 
@@ -93,12 +147,7 @@ Coloque seus arquivos PDF ou ZIP na pasta `resouces/inputNotasCorretagem/`
 cp notas_corretagem.zip resouces/inputNotasCorretagem/
 ```
 
-### 2. Execute o script
-
-```bash
-cd src
-python extratorNotasCorretagem.py
-```
+### Execute o script
 
 ### 3. Acompanhe o progresso
 
