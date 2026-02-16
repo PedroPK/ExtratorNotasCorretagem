@@ -102,13 +102,20 @@ def get_config():
     """Obtém a instância global de configuração"""
     global _config_instance
     if _config_instance is None:
-        # Tenta encontrar application.properties
+        # Tenta encontrar application.properties em resouces/
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        config_path = os.path.join(script_dir, 'application.properties')
+        project_root = os.path.dirname(script_dir)
         
-        # Se não encontrar, tenta um nível acima
+        # Primeiro tenta em resouces/
+        config_path = os.path.join(project_root, 'resouces', 'application.properties')
+        
+        # Se não encontrar, tenta na raiz (para compatibilidade)
         if not os.path.exists(config_path):
-            config_path = os.path.join(os.path.dirname(script_dir), 'application.properties')
+            config_path = os.path.join(project_root, 'application.properties')
+        
+        # Se ainda não encontrar, tenta em src/
+        if not os.path.exists(config_path):
+            config_path = os.path.join(script_dir, 'application.properties')
         
         _config_instance = ConfigManager(config_path if os.path.exists(config_path) else None)
     

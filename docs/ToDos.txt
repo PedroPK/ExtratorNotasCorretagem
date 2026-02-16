@@ -9,4 +9,4 @@
 9. Criar arquivo De-Para dentro de Resources (tickerMapping.properties)
 10. Mover logs para a pasta Resources
 11. Permitir o processamento de uma quantidade específica de arquivos
-12. Escolher que anos desejamos processar. 
+12. Escolher que anos desejamos processar. - DONE 
