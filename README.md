@@ -82,8 +82,11 @@ output.format=csv
 # Pasta de entrada com os PDFs
 input.folder=../resouces/inputNotasCorretagem
 
-# Pasta de saída dos dados extraídos
-output.folder=../output
+# Pasta de saída dos dados extraídos (agora dentro de resouces)
+output.folder=../resouces/output
+
+# Pasta de logs
+logs.folder=../resouces/output/logs
 ```
 
 ## 📂 Estrutura do Projeto
@@ -91,14 +94,19 @@ output.folder=../output
 ```
 ExtratorNotasCorretagem/
 ├── src/
-│   └── extratorNotasCorretagem.py      # Script principal
-├── resouces/
-│   └── inputNotasCorretagem/           # Pasta com PDFs/ZIPs de entrada
-├── output/                              # Pasta de saída (criada automaticamente)
+│   ├── extratorNotasCorretagem.py      # Script principal
+│   ├── config.py                        # Gerenciador de configuração
+│   └── extracao_YYYYMMDD_HHMMSS.log    # Arquivos de log (criados durante execução)
+├── resouces/                            # Pasta de entrada e saída
+│   ├── inputNotasCorretagem/            # PDFs/ZIPs de entrada
+│   └── output/                          # Dados extraídos
+│       ├── logs/                        # Arquivos de log
+│       └── dados_extraidos_*.csv        # CSVs gerados
+├── docs/                                # Documentação
 ├── application.properties               # Arquivo de configuração
 ├── requirements.txt                     # Dependências Python
 ├── .gitignore                          # Arquivos ignorados pelo Git
-└── README.md                           # Este arquivo
+└── README.md                            # Este arquivo
 ```
 
 ## 💻 Como Usar
@@ -188,7 +196,34 @@ Data,Ticker,Operação,Quantidade,Preço
 04/05/2021,VALE3,V,10,100.50
 ```
 
-## 🔒 PDFs Protegidos
+## � Arquivos de Log
+
+Os logs de cada execução são salvos automaticamente em `resouces/output/logs/`:
+
+```bash
+resouces/output/logs/
+├── extracao_20260216_140643.log   # Log da extração de 2024-02-16 14:06:43
+├── extracao_20260216_140704.log   # Log da extração de 2024-02-16 14:07:04
+└── ...
+```
+
+**Formato do arquivo de log:**
+```
+16/02/2026 14:06:43 - INFO - 📂 Diretório de entrada: ../resouces/inputNotasCorretagem
+16/02/2026 14:06:43 - INFO - ✓ Pasta encontrada. Processando...
+16/02/2026 14:06:43 - INFO - 🚀 INICIANDO PROCESSAMENTO
+16/02/2026 14:06:43 - INFO - 📥 Total estimado de PDFs para processar: 91
+...
+```
+
+Para ajustar o nível de detalhe dos logs, edite `application.properties`:
+```properties
+logging.level=DEBUG   # Máximo detalhe
+logging.level=INFO    # Padrão (recomendado)
+logging.level=WARNING # Apenas avisos
+```
+
+## �🔒 PDFs Protegidos
 
 Se os PDFs estiverem protegidos com senha:
 
