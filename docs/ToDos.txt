@@ -1,9 +1,9 @@
 1. Gerar um XLSX ao invés de um CSV - DONE
-2. Gerar uma aba adicional com dados por Ano, Mês, Dia
+2. Gerar uma aba adicional com dados por Ano, Mês, Dia, ou fazer uma extração em árvore.
 3. Fazer com que a barra de Progresso seja exibida uma única vez, no rodapé do terminal
 4. Calcular os Preços Médios de cada Ativo
 5. Gerar Gráficos de Alocação.
-6. Ordenar por Data, em ordem ascendente.
+6. Ordenar por Data, em ordem ascendente. - DONE
 7. Corrigir Tickers de Ações com o De-Para
 8. Mover a pasta Outputs para dentro de Resources - DONE
 9. Criar arquivo De-Para dentro de Resources (tickerMapping.properties)

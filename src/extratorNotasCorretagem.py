@@ -629,6 +629,62 @@ def ordenar_dados_por_data(df):
         return df
 
 
+def criar_aba_arvore(df):
+    """Cria um DataFrame com estrutura de árvore partindo a Data em Ano/Mês/Dia.
+    
+    As colunas de Ano, Mês e Dia são preenchidas apenas ao mudar o período,
+    criando uma visualização em árvore hierárquica.
+    
+    Args:
+        df (pd.DataFrame): DataFrame ordenado com coluna 'Data' em DD/MM/YYYY
+        
+    Returns:
+        pd.DataFrame: DataFrame com colunas [Ano, Mês, Dia, Data, Ticker, Operação, 
+                      Quantidade, Preço]
+    """
+    if df.empty:
+        return pd.DataFrame()
+    
+    try:
+        # Cria cópia para não modificar o original
+        df_arvore = df.copy()
+        
+        # Extrai Ano, Mês, Dia da Data
+        df_arvore['Data_dt'] = pd.to_datetime(df_arvore['Data'], format='%d/%m/%Y')
+        df_arvore['Ano'] = df_arvore['Data_dt'].dt.year.astype(str)
+        df_arvore['Mes'] = df_arvore['Data_dt'].dt.month.astype(str).str.zfill(2)
+        df_arvore['Dia'] = df_arvore['Data_dt'].dt.day.astype(str).str.zfill(2)
+        
+        # Monta chave de período (Ano-Mês-Dia)
+        df_arvore['periodo'] = df_arvore['Ano'] + '-' + df_arvore['Mes'] + '-' + df_arvore['Dia']
+        
+        # Identifica onde o período muda em relação à linha anterior
+        df_arvore['periodo_anterior'] = df_arvore['periodo'].shift(1)
+        df_arvore['muda_ano'] = df_arvore['Ano'] != df_arvore['Ano'].shift(1)
+        df_arvore['muda_mes'] = (df_arvore['Ano'] + '-' + df_arvore['Mes']) != \
+                                  (df_arvore['Ano'].shift(1) + '-' + df_arvore['Mes'].shift(1))
+        df_arvore['muda_dia'] = df_arvore['periodo'] != df_arvore['periodo'].shift(1)
+        
+        # Preenche Ano, Mês, Dia apenas quando mudam (criando efeito de árvore)
+        df_arvore.loc[~df_arvore['muda_ano'], 'Ano'] = ''
+        df_arvore.loc[~df_arvore['muda_mes'], 'Mes'] = ''
+        df_arvore.loc[~df_arvore['muda_dia'], 'Dia'] = ''
+        
+        # Ordena colunas: Ano, Mês, Dia, Data, Ticker, Operação, Quantidade, Preço
+        colunas_arvore = ['Ano', 'Mes', 'Dia', 'Data', 'Ticker', 'Operação', 'Quantidade', 'Preço']
+        df_arvore = df_arvore[colunas_arvore]
+        
+        # Remove coluna auxiliar de data convertida
+        if 'Data_dt' in df_arvore.columns:
+            df_arvore = df_arvore.drop('Data_dt', axis=1, errors='ignore')
+        
+        return df_arvore.reset_index(drop=True)
+    
+    except Exception as e:
+        logger.warning(f"⚠️  Erro ao criar aba de árvore: {str(e)}")
+        return df.copy()
+
+
 def exportar_dados(df, formato=None):
     """Exporta os dados extraídos para o formato especificado.
     
@@ -668,9 +724,18 @@ def exportar_dados(df, formato=None):
             
         elif formato == 'xlsx':
             arquivo_saida = os.path.join(pasta_output, f"dados_extraidos_{timestamp}.xlsx")
-            df.to_excel(arquivo_saida, index=False, sheet_name="Dados")
-            logger.info(f"✓ Dados exportados para XLSX: {arquivo_saida}")
-            logger.info(f"   Linhas: {len(df)} | Colunas: {len(df.columns)}")
+            # Cria writer para múltiplas abas
+            with pd.ExcelWriter(arquivo_saida, engine='openpyxl') as writer:
+                # Aba 1: Dados completos e ordenados
+                df.to_excel(writer, sheet_name="Dados", index=False)
+                logger.info(f"✓ Aba 'Dados' criada: {len(df)} linhas, {len(df.columns)} colunas")
+                
+                # Aba 2: Estrutura de árvore (Ano/Mês/Dia hierárquicos)
+                df_arvore = criar_aba_arvore(df)
+                df_arvore.to_excel(writer, sheet_name="Árvore", index=False)
+                logger.info(f"✓ Aba 'Árvore' criada: {len(df_arvore)} linhas (estrutura hierárquica)")
+            
+            logger.info(f"✓ Arquivo XLSX exportado com 2 abas: {arquivo_saida}")
             
         elif formato == 'json':
             arquivo_saida = os.path.join(pasta_output, f"dados_extraidos_{timestamp}.json")
