@@ -6,8 +6,15 @@ Utiliza web scraping e heurísticas para encontrar tickers
 
 import re
 import os
+import sys
+import json
+try:
+    import requests
+except Exception:
+    requests = None
 from pathlib import Path
 from typing import Dict, Optional
+from config import get_config
 
 class TickerMapper:
     """Mapeia descrições de ativos para tickers B3"""
@@ -27,25 +34,32 @@ class TickerMapper:
         """
         # Remove extra spaces
         name = asset_name.strip()
-        
-        # Procura por padrões conhecidos
-        patterns = {
-            r'(\w+)\s+ON\s+NM': ('ON', 3),  # ON (Ordinária) = sufixo 3
-            r'(\w+)\s+PN\s+N1': ('PN', 4),  # PN (Preferencial) = sufixo 4 ou 5
-            r'(\w+)\s+PN\s+N2': ('PN', 5),
-            r'(\w+)\s+PNA': ('PN', 5),
-            r'(\w+)\s+PNB': ('PN', 6),
-            r'(\w+)\s+DR': ('DR', None),    # ADR/DR (não tem sufixo padrão)
-        }
-        
-        for pattern, (tipo, sufixo) in patterns.items():
-            match = re.search(pattern, name, re.IGNORECASE)
-            if match:
-                empresa = match.group(1)
-                return (empresa, tipo, sufixo)
-        
-        # Fallback: assume ON e extrai primeira palavra
-        empresa = name.split()[0]
+
+        # Captura nomes multi-palavra seguidos de sufixo (ON, PN, PNA, PNB, DR)
+        m = re.search(r"([A-Za-zÀ-ÿ0-9\.\- ]{2,80}?)\s+(ON|PN|PNA|PNB|DR)\b", name, re.IGNORECASE)
+        if m:
+            empresa = m.group(1).strip()
+            tipo = m.group(2).upper()
+            # Normaliza sufixo numérico
+            if tipo == 'ON':
+                sufixo = 3
+            elif tipo == 'PN':
+                # PN pode ter variações N1/N2; tenta inferir pelo texto
+                if re.search(r'PN\s+N2', name, re.IGNORECASE) or re.search(r'PNA', name, re.IGNORECASE):
+                    sufixo = 5
+                else:
+                    sufixo = 4
+            elif tipo == 'PNA':
+                sufixo = 5
+            elif tipo == 'PNB':
+                sufixo = 6
+            else:
+                sufixo = None
+            return (empresa, tipo, sufixo)
+
+        # Fallback: use the full tokenized first significant word as company
+        parts = [p for p in re.split(r"[\s\-]+", name) if p]
+        empresa = parts[0] if parts else name
         return (empresa, 'ON', 3)
     
     def generate_ticker_heuristic(self, empresa: str, tipo: str, sufixo: Optional[int]) -> Optional[str]:
@@ -65,7 +79,7 @@ class TickerMapper:
             return None
         
         empresa_upper = empresa.upper()
-        
+
         # Alguns casos especiais conhecidos
         especiais = {
             'EMBRAER': ('EMBR', 3),
@@ -84,8 +98,14 @@ class TickerMapper:
             if empresa_upper.startswith(empresa_chave.split()[0]):
                 return f"{prefixo}{sufixo_correto}"
         
-        # Heurística: primeiras 4 letras + sufixo
-        prefixo = empresa_upper[:4]
+        # Heurística: construir prefixo a partir das palavras significativas
+        # Remove palavras genéricas (DO/DA/DE/E/S/A/SA)
+        stopwords = {'DO', 'DA', 'DE', 'E', 'S', 'A', 'SA', 'S/A'}
+        words = [w for w in re.split(r"\s+", empresa_upper) if w and w not in stopwords]
+        join = ''.join(words)
+        if not join:
+            join = re.sub(r'[^A-Z0-9]', '', empresa_upper)
+        prefixo = (join[:4] if len(join) >= 4 else (join.ljust(4, 'X')))
         return f"{prefixo}{sufixo}"
     
     def search_b3_api(self, empresa: str) -> Optional[str]:
@@ -97,7 +117,58 @@ class TickerMapper:
         - Yahoo Finance Brasil
         - Fundamentus
         """
-        # Atualmente apenas retorna None - implementar no futuro
+        empresa_q = empresa.strip()
+        if not empresa_q:
+            return None
+
+        if requests is None:
+            # requests não disponível no ambiente — não tentar lookup web
+            return None
+
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (compatible; ExtratorNotas/1.0; +https://github.com/pedropk)'
+        }
+
+        # 1) Tentar Yahoo Finance search API (retorna JSON com 'quotes')
+        try:
+            q = requests.utils.requote_uri(empresa_q)
+            url = f'https://query2.finance.yahoo.com/v1/finance/search?q={q}&quotesCount=10&newsCount=0'
+            resp = requests.get(url, headers=headers, timeout=8)
+            if resp.status_code == 200:
+                try:
+                    data = resp.json()
+                    quotes = data.get('quotes', [])
+                    for item in quotes:
+                        symbol = item.get('symbol', '')
+                        exch = item.get('exchange', '')
+                        shortname = item.get('shortname', '') or item.get('longname', '')
+                        # Prioriza símbolos do Brasil (terminam com .SA)
+                        if symbol.endswith('.SA'):
+                            # Remove sufixo .SA
+                            return symbol.replace('.SA', '')
+                        # Em alguns casos o símbolo já é BR- prefixed; tenta extrair caso seja B3
+                        if exch and 'SA' in exch.upper() and re.search(r'[A-Z]{1,5}\d', symbol):
+                            return symbol
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # 2) Tentar Fundamentus (busca por nome)
+        try:
+            f_q = requests.utils.requote_uri(empresa_q)
+            funda_url = f'https://fundamentus.com.br/busca.php?search={f_q}'
+            r = requests.get(funda_url, headers=headers, timeout=8)
+            if r.status_code == 200 and 'html' in r.headers.get('Content-Type', ''):
+                # Busca por padrão de ticker no HTML
+                # Procura por padrões como 'QUAL3' ou 'EMBR3' (4 letras + dígito)
+                m = re.search(r'([A-Z]{3,5}\d)', r.text)
+                if m:
+                    return m.group(1)
+        except Exception:
+            pass
+
+        # 3) Nenhum resultado confiável
         return None
     
     def load_existing_mapping(self):
@@ -194,12 +265,69 @@ class TickerMapper:
 def main():
     """Script principal"""
     import sys
-    
+    import argparse
+
     print("\n🚀 Gerador de Mapeamento de Tickers B3\n")
-    
+
+    parser = argparse.ArgumentParser(description='Gerador de mapeamento de tickers')
+    parser.add_argument('--from-pdf', action='store_true', help='Coleta descrições a partir das Notas (PDFs) antes de gerar o mapping')
+    parser.add_argument('--year', '-y', type=int, default=None, help='Filtrar por ano ao coletar descrições das Notas')
+    parser.add_argument('--output', '-o', type=str, default=None, help='Arquivo de saída (opcional)')
+    args = parser.parse_args()
+
     mapper = TickerMapper()
-    
-    # Exemplos de teste
+
+    if args.from_pdf:
+        # Importa coletor reutilizável (garante que pasta src/ esteja no sys.path)
+        try:
+            src_dir = os.path.dirname(__file__)
+            if src_dir not in sys.path:
+                sys.path.insert(0, src_dir)
+            from collect_asset_descriptions import collect_descriptions_from_path
+        except Exception:
+            print('✗ Não foi possível importar collect_asset_descriptions. Verifique se está em src/ e importável.')
+            print('  Dica: instale dependências com: python3 -m pip install -r resouces/requirements.txt')
+            sys.exit(1)
+        print(f"📄 Coletando descrições a partir das Notas (ano={args.year})...")
+
+        # Verifica dependências essenciais antes de continuar
+        try:
+            import pdfplumber  # type: ignore
+        except Exception:
+            print('✗ Dependência ausente: pdfplumber. Instale com: python3 -m pip install pdfplumber')
+            print('  Ou execute: python3 -m pip install -r resouces/requirements.txt')
+            sys.exit(1)
+        try:
+            descricoes = collect_descriptions_from_path(year=args.year)
+        except Exception as e:
+            print(f"✗ Erro ao coletar descrições: {e}")
+            sys.exit(1)
+
+        if not descricoes:
+            print('⚠️  Nenhuma descrição encontrada nas Notas para o filtro especificado')
+            print('  Verifique se os PDFs corretos estão em resouces/inputNotasCorretagem ou passe --input PATH ao coletor')
+            sys.exit(0)
+
+        # Gera mapeamento a partir das descrições coletadas
+        mapper.generate_from_pdf_descriptions(descricoes)
+
+        # Se solicitado, salva também as descrições coletadas em arquivo
+        if args.output:
+            out = args.output
+        else:
+            cfg = get_config()
+            outfolder = cfg.resolve_path('resouces')
+            os.makedirs(outfolder, exist_ok=True)
+            out = os.path.join(outfolder, f"ticker_candidates_{args.year or 'all'}.txt")
+
+        with open(out, 'w', encoding='utf-8') as f:
+            for d in descricoes:
+                f.write(d + '\n')
+
+        print(f"✓ Descrições salvas em: {out}")
+        return
+
+    # Default: executa exemplos embutidos (modo de teste rápido)
     exemplos = [
         "Embraer ON NM",
         "Ultrapar ON NM",
@@ -209,15 +337,8 @@ def main():
         "Petrobras ON",
         "Cosan ON NM",
     ]
-    
+
     mapper.generate_from_pdf_descriptions(exemplos)
-    
-    # Opcionalmente, pode fornecer lista de ativos
-    if len(sys.argv) > 1:
-        if sys.argv[1] == '--from-pdf':
-            # TODO: Extrair ativos de PDFs e gerar mapeamento
-            print("📄 Modo: Extrair ativos de PDFs e gerar mapeamento")
-            print("   (Será implementado quando integrado com extratorNotasCorretagem.py)")
 
 
 if __name__ == '__main__':

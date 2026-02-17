@@ -330,6 +330,29 @@ Para gerar o arquivo (modo rápido):
 python3 src/gerar_ticker_mapping.py
 ```
 
+Executar a partir das Notas (PDFs) — recomendação automatizada
+-------------------------------------------------------------
+
+Após instalar as dependências, você pode gerar o mapeamento automaticamente a partir
+das Notas de Corretagem com o helper `scripts/setup_and_generate.sh`:
+
+```bash
+# Cria um venv, instala dependências e executa o gerador usando os PDFs
+./scripts/setup_and_generate.sh 2018
+```
+
+O script criará um ambiente virtual `.venv`, instalará o conteúdo de `resouces/requirements.txt`
+e executará `src/gerar_ticker_mapping.py --from-pdf --year 2018`.
+
+Se preferir executar manualmente em um ambiente já preparado:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r resouces/requirements.txt
+python3 src/gerar_ticker_mapping.py --from-pdf --year 2018
+```
+
 Saída esperada:
 - Mensagens no console indicando os ativos processados
 - Arquivo `resouces/tickerMapping.properties` criado/atualizado

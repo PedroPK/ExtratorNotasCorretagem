@@ -5,7 +5,7 @@
 5. Gerar Gráficos de Alocação.
 6. Ordenar por Data, em ordem ascendente.
 7. Corrigir Tickers de Ações com o De-Para
-8. Mover a pasta Outputs para dentro de Resources
+8. Mover a pasta Outputs para dentro de Resources - DONE
 9. Criar arquivo De-Para dentro de Resources (tickerMapping.properties)
 10. Mover logs para a pasta Resources - DONE
 11. Permitir o processamento de uma quantidade específica de arquivos
