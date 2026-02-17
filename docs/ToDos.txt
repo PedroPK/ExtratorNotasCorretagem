@@ -1,4 +1,4 @@
-1. Gerar um XLSX ao invés de um CSV
+1. Gerar um XLSX ao invés de um CSV - DONE
 2. Gerar uma aba adicional com dados por Ano, Mês, Dia
 3. Fazer com que a barra de Progresso seja exibida uma única vez, no rodapé do terminal
 4. Calcular os Preços Médios de cada Ativo
@@ -10,3 +10,5 @@
 10. Mover logs para a pasta Resources - DONE
 11. Permitir o processamento de uma quantidade específica de arquivos
 12. Escolher que anos desejamos processar. - DONE 
+13. Implantar o SonarQube ou outra ferramenta de SAST para Python
+14. Implementar Testes.

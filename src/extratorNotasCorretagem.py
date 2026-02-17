@@ -599,6 +599,36 @@ def analisar_pasta_ou_zip(caminho, year_filter: Optional[int] = None):
         return pd.DataFrame()
 
 
+def ordenar_dados_por_data(df):
+    """Ordena o DataFrame por Data (do mais antigo para o mais recente).
+    
+    Args:
+        df (pd.DataFrame): DataFrame com coluna 'Data' em formato DD/MM/YYYY
+        
+    Returns:
+        pd.DataFrame: DataFrame ordenado por data
+    """
+    if df.empty:
+        return df
+    
+    try:
+        # Converte coluna Data para datetime (formato DD/MM/YYYY)
+        df['Data'] = pd.to_datetime(df['Data'], format='%d/%m/%Y')
+        
+        # Ordena por Data (do mais antigo para o mais recente)
+        df = df.sort_values('Data', ascending=True)
+        
+        # Converte Data de volta para string no formato original DD/MM/YYYY
+        df['Data'] = df['Data'].dt.strftime('%d/%m/%Y')
+        
+        logger.info("✓ Dados ordenados por data (mais antigo para o mais recente)")
+        return df.reset_index(drop=True)
+    
+    except Exception as e:
+        logger.warning(f"⚠️  Erro ao ordenar dados por data: {str(e)}")
+        return df
+
+
 def exportar_dados(df, formato=None):
     """Exporta os dados extraídos para o formato especificado.
     
@@ -614,6 +644,8 @@ def exportar_dados(df, formato=None):
         return False
     
     try:
+        # Ordena dados por data antes de exportar
+        df = ordenar_dados_por_data(df)
         # Obtém formato da config se não fornecido
         if formato is None:
             formato = config.get_output_format().lower()
