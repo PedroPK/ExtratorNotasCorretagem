@@ -205,7 +205,7 @@ class TickerMapper:
         return None
     
     def load_existing_mapping(self):
-        """Carrega mapeamento existente do arquivo"""
+        """Carrega mapeamento existente do arquivo e normaliza tickers"""
         if os.path.exists(self.mapping_file):
             try:
                 with open(self.mapping_file, 'r', encoding='utf-8') as f:
@@ -215,10 +215,51 @@ class TickerMapper:
                             continue
                         if '=' in line:
                             desc, ticker = line.split('=', 1)
-                            self.mapping[desc.strip()] = ticker.strip()
+                            desc = desc.strip()
+                            ticker = ticker.strip()
+                            # Normaliza ticker ao carregar
+                            ticker = self._normalize_ticker(ticker, desc)
+                            self.mapping[desc] = ticker
                 print(f"✓ Carregados {len(self.mapping)} mapeamentos existentes")
             except Exception as e:
                 print(f"⚠️  Erro ao carregar tickerMapping.properties: {str(e)}")
+    
+    def _normalize_ticker(self, ticker: str, asset_description: str) -> str:
+        """
+        Normaliza ticker aplicando regras B3:
+        1. Remove sufixo F (mercado fracionário)
+        2. ON deve terminar em 3; se terminar em 4, corrige
+        3. PN deve terminar em 4; se terminar em 3, corrige
+        
+        Args:
+            ticker: Ticker B3 original
+            asset_description: Descrição do ativo (usado para detectar ON/PN)
+        
+        Returns:
+            Ticker normalizado
+        """
+        if not ticker:
+            return ticker
+        
+        # Remove F do final (fracionário)
+        if ticker.endswith('F'):
+            ticker = ticker[:-1]
+        
+        # Detecta tipo (ON, PN) da descrição
+        desc_upper = asset_description.upper()
+        is_on = ' ON' in desc_upper
+        is_pn = ' PN' in desc_upper
+        
+        # ON deve terminar em 3
+        if is_on and ticker.endswith('4'):
+            ticker = ticker[:-1] + '3'
+        
+        # PN deve terminar em 4; se terminar em 3, corrige
+        if is_pn and ticker.endswith('3'):
+            ticker = ticker[:-1] + '4'
+        
+        return ticker
+    
     
     def save_mapping(self):
         """Salva mapeamento em arquivo"""
@@ -245,6 +286,7 @@ class TickerMapper:
         1. Verifica se já existe no mapeamento
         2. Tenta buscar via web scraping
         3. Usa heurística como fallback
+        4. Normaliza ticker (remove F, corrige ON/PN)
         """
         # 1. Verifica cache
         if asset_description in self.mapping:
@@ -260,7 +302,9 @@ class TickerMapper:
         if not ticker:
             ticker = self.generate_ticker_heuristic(empresa, tipo, sufixo)
         
+        # 5. Normaliza ticker
         if ticker:
+            ticker = self._normalize_ticker(ticker, asset_description)
             self.mapping[asset_description] = ticker
             print(f"  ✓ {asset_description:30} → {ticker}")
             return ticker
