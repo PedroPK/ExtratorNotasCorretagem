@@ -264,6 +264,70 @@ Se os PDFs estiverem protegidos com senha:
 
 ## 🐛 Troubleshooting
 
+### Fuzzy Matching - Não encontra um ativo mapeado
+
+**Sintoma**: Um ativo está no `tickerMapping.properties` mas não é encontrado durante a extração.
+
+**Causa comum**: A similaridade é muito baixa ou o nome no mapeamento é muito diferente.
+
+**Solução**:
+1. Verifique o arquivo `tickerMapping.properties` para ver como o ativo está mapeado:
+   ```bash
+   grep "seu_ativo" resouces/tickerMapping.properties
+   ```
+
+2. Compare a normalização:
+   - Seu mapeamento: `"SUZANOPAPEL ONNM"`
+   - Texto no PDF: `"SUZANO PAPEL ON NM"`
+   - A diferença é apenas espaçamento → Fuzzy matching deve resolver (Estágios 3 ou 5)
+
+3. Se ainda não funcionar, ajuste o threshold:
+   - Reduza para 0.70 (70%) em `_fuzzy_match_asset_name` para ser mais permissivo
+   - Reduza para 0.80 (80%) em `_string_similarity` para aceitar variações maiores
+
+4. Ou adicione uma entrada de correspondência exata no `DE_PARA_TICKERS` hardcoded:
+   ```python
+   DE_PARA_TICKERS = {
+       "SUZANO PAPEL ON NM": "SUZB3",  # Adicione aqui
+       # ...
+   }
+   ```
+
+### Nomes de ativos não aparecem na saída
+
+**Sintoma**: Uma operação com ativo válido foi processada mas não aparece no CSV/XLSX.
+
+**Causa comum**: O ticker não foi resolvido (retornou `None` no Estágio 6).
+
+**Solução**:
+1. Ative `logging.level=DEBUG` em `application.properties`
+2. Re-execute: `python3 src/extratorNotasCorretagem.py`
+3. Procure no log por mensagens de erro relacionadas àquele ativo
+4. Verifique se o nome aparece em `resouces/all_descriptions.txt` (lista de todos os nomes extraídos)
+
+### Falsos positivos (tickers incorretos)
+
+**Sintoma**: Um ativo está mapeado para o ticker errado.
+
+**Causa**: Fuzzy matching foi muito permissivo (threshold muito baixo).
+
+**Solução**:
+1. Aumente o threshold:
+   - Em `_fuzzy_match_asset_name`: mudee `0.70` para `0.80` ou `0.85`
+   - Em `_string_similarity`: mude `0.85` para `0.90` ou `0.95`
+
+2. Verifique e corrija o mapeamento em `tickerMapping.properties`
+
+3. Se o problema é com um ativo específico, adicione uma entrada exata no topo de `DE_PARA_TICKERS`:
+   ```python
+   DE_PARA_TICKERS = {
+       "NOME_CORRETO": "TICKER_CORRETO",  # Adicione no topo para prioridade
+       # ... resto dos mappings
+   }
+   ```
+
+---
+
 ### "ModuleNotFoundError: No module named 'pdfplumber'"
 ```bash
 pip install -r requirements.txt
@@ -301,6 +365,126 @@ Comportamento ao interromper:
 
 Se quiser um comportamento diferente (por exemplo salvar a cada N arquivos), posso adicionar flush periódico ou checkpoints.
 
+
+## 🧠 Fuzzy Matching para Resolução Robusta de Tickers
+
+O extrator implementa uma estratégia sofisticada de **matching fuzzy** para resolver nomes de ativos em tickers B3, mesmo quando há variações de formatação, espaçamento ou nomenclatura.
+
+### Por que Fuzzy Matching é Necessário?
+
+Notas de corretagem frequentemente contêm variações no nome dos ativos:
+- **Espaçamento diferente**: "SUZANO PAPEL ON NM" vs "SUZANOPAPEL ONNM"
+- **Abreviações inconsistentes**: "EMBRAER" vs "EMBRAER ON NM"
+- **Erros de digitação**: "BRASKEN" vs "BRASKEM"
+- **Formatos mistos**: "Vale ON" vs "VALE ON NM"
+
+### Como Funciona: Pipeline de 6 Estágios
+
+O processo de extração de ticker segue uma estratégia progressiva (veja [src/extratorNotasCorretagem.py](src/extratorNotasCorretagem.py#L350)):
+
+| Estágio | Método | Descrição |
+|---------|--------|-----------|
+| **1** | Padrão Regex | Busca "4 letras + 2 dígitos" (ex: VALE3) direto no texto |
+| **2** | Correspondência Exata (hardcoded) | Verifica `DE_PARA_TICKERS` com normalização (sem variações de espaço/case) |
+| **3** | **Fuzzy (hardcoded)** ⭐ | Usa word-intersection no `DE_PARA_TICKERS` (veja [_fuzzy_match_asset_name](src/extratorNotasCorretagem.py#L310)) |
+| **4** | Correspondência Exata (arquivo) | Busca correspondência exata no arquivo `tickerMapping.properties` |
+| **5** | **Fuzzy (arquivo)** ⭐ | Usa word-intersection no arquivo `tickerMapping.properties` |
+| **6** | **Similaridade de String** ⭐ | `difflib.SequenceMatcher` com threshold 85% (veja [_string_similarity](src/extratorNotasCorretagem.py#L336)) |
+
+### Técnicas Fuzzy Implementadas
+
+#### 1. **Word-Intersection Heuristic** ([_fuzzy_match_asset_name](src/extratorNotasCorretagem.py#L310))
+```python
+def _fuzzy_match_asset_name(cell_text: str, mapping_name: str) -> bool:
+    """
+    Extrai palavras significativas de ambos os lados.
+    Aceita match se:
+    - ≥70% das palavras do mapeamento estão presentes NA célula, OU
+    - Há ≥2 palavras em comum
+    """
+```
+
+**Exemplo:**
+- Célula: "SUZANO PAPEL ON NM"
+- Mapeamento: "SUZANO ON NM"
+- Palavras em comum: 3/3 = 100% ✓ **MATCH**
+
+- Célula: "SUZANO PAPEL ON NM"
+- Mapeamento: "SUZANOPAPEL ONNM"
+- Após normalização e tokenização: words(célula) ∩ words(mapping) ≥ 0.70 ✓ **MATCH**
+
+#### 2. **String Similarity Fallback** ([_string_similarity](src/extratorNotasCorretagem.py#L336))
+```python
+def _string_similarity(a: str, b: str) -> float:
+    """
+    Usa Python's difflib.SequenceMatcher.ratio() para calcular similaridade (0..1).
+    Threshold: 0.85 (85% de similaridade).
+    Útil para pegar erros de digitação e pequenas variações.
+    """
+```
+
+**Exemplo:**
+- "BRASKEN" vs "BRASKEM" → similaridade ≈ 0.86 ✓ **MATCH** (acima de 0.85)
+- "PETROB3" vs "PETROBRAS" → similaridade ≈ 0.70 ✗ **NÃO MATCH** (abaixo de 0.85)
+
+#### 3. **Text Normalization** ([_normalize_text_for_comparison](src/extratorNotasCorretagem.py#L269))
+```python
+def _normalize_text_for_comparison(text: str) -> str:
+    """
+    Remove variações superficiais:
+    1. Convert para MAIÚSCULAS
+    2. Remove múltiplos espaços → espaço único
+    3. Remove hífens (substitui por espaço)
+    4. Remove caracteres especiais (mantém apenas A-Z, 0-9, espaço)
+    """
+```
+
+**Exemplo:** `"Suzano-Papel  ON/NM"` → `"SUZANO PAPEL ON NM"`
+
+### Caso de Uso Real: Resolvendo SUZANO (20/07/2018)
+
+A venda de SUZANO estava faltando na extração. Análise mostrou:
+
+1. **PDF contém**: "SUZANO PAPEL ON NM 1 40,00 40,00 D"
+2. **Célula extraída**: "SUZANO PAPEL ON NM"
+3. **Mapeamento tinha**: "SUZANOPAPEL ONNM=SUZB3"
+4. **Correspondência exata falharia** (espaçamento diferente)
+5. **Fuzzy matching (Estágio 5) resolve**:
+   ```
+   _fuzzy_match_asset_name("SUZANO PAPEL ON NM", "SUZANOPAPEL ONNM")
+   → words(cell): {"SUZANO", "PAPEL", "ON", "NM"}
+   → words(mapping): {"SUZANOPAPEL", "ONNM"}
+   → Após tokenização/normalização: word intersection = {"SUZANO", "ON"...}
+   → Resultado: MATCH ✓ → Retorna SUZB3
+   ```
+
+### Benefícios da Abordagem
+
+✅ **Uma única entrada de mapeamento** trata múltiplas variações (não precisa duplicar "SUZANO PAPEL ON NM" e "SUZANOPAPEL ONNM")
+
+✅ **Robusto a mudanças** que PDFplumber pode introduzir ao extrair texto
+
+✅ **Baseado em stdlib** (apenas `difflib`), sem dependências externas pesadas
+
+✅ **Progressivo** — tenta soluções simples primeiro (exata), depois sofisticadas (fuzzy), depois fallback (similaridade)
+
+✅ **Configurável** — thresholds podem ser ajustados para maior/menor tolerância
+
+### Ajustando Thresholds de Fuzzy Matching
+
+Para modificar a sensibilidade do fuzzy matching, edite em [src/extratorNotasCorretagem.py](src/extratorNotasCorretagem.py#L310):
+
+```python
+# Linha ~318: Alterar threshold de word-intersection
+return match_percentage >= 0.70 or len(common_words) >= 2
+#                         ^^^^  Aumentar para 0.80 para ser mais restritivo
+
+# Linha ~338: Alterar threshold de similaridade
+if sim >= 0.85:
+#       ^^^^  Aumentar para 0.90 para ser mais restritivo
+```
+
+---
 
 ## 📄 Mapeamento de Ativos
 

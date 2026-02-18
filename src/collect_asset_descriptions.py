@@ -19,9 +19,9 @@ def normalize_description(desc: str) -> str:
     """Normaliza uma descrição bruta extraída de PDF.
 
     Objetivos:
-    - Remover prefixos numéricos e tokens de mercado (ex: '1-BOVESPA C FRACIONARIO')
-    - Remover prefixo "V FRACIONARIO" (que indica operação fracionária, não é parte do ativo)
-    - Remover sufixos com anotações e colunas numéricas (ex: '@# 1 48,82 48,82 D')
+    - Remover prefixos numéricos e tokens de mercado/operação
+    - Remover "C FRACIONARIO", "C VISTA", "V FRACIONARIO", "V VISTA", "RV LISTADO"
+    - Remover sufixos com anotações e colunas numéricas
     - Colapsar espaços e limpar pontuação redundante
     - Preservar sufixos de série como ON/PN/PNA/PNB/DR e opcionalmente NM
     """
@@ -36,33 +36,45 @@ def normalize_description(desc: str) -> str:
     # Remove prefixos numéricos tipo '1-' ou '01 -'
     s = re.sub(r"^\s*\d+[\-\s]*", "", s)
 
-    # Remove "V FRACIONARIO" ou "V FRACIONÁRIO" do início (indica operação fracionária)
-    # Deve ser feito primeiro, antes de outros prefixos, para evitar deixar "FRACIONARIO" sozinho
-    s = re.sub(r"^V(?:\s+FRACIONARIO|\s+FRACIONÁRIO)\b[\s]*", "", s, flags=re.IGNORECASE)
+    # Remove prefixos de operação e tipo que não são parte do ativo
+    # Padrões como:
+    # - "C FRACIONARIO" ou "C VISTA" (tipos de operação)
+    # - "V FRACIONARIO" ou "V VISTA" (venda em modo específico)
+    # - "RV LISTADO C FRACIONARIO" (reverso)
+    # Esses podem ter números entre eles (ex: "C FRACIONARIO 2 TELEF")
+    operation_patterns = [
+        r"^RV\s+LISTADO\s+C\s+FRACIONARIO\b[\d\s]*",  # RV LISTADO C FRACIONARIO
+        r"^C\s+FRACIONARIO\b[\d\s]*",                 # C FRACIONARIO (com número opcional)
+        r"^C\s+VISTA\b[\d\s]*",                        # C VISTA
+        r"^V\s+FRACIONARIO\b[\d\s]*",                 # V FRACIONARIO
+        r"^V\s+VISTA\b[\d\s]*",                        # V VISTA
+        r"^RV\s+LISTADO\b[\s]*",                       # RV LISTADO
+    ]
+    for pattern in operation_patterns:
+        s = re.sub(pattern, "", s, flags=re.IGNORECASE)
 
-    # Remove tokens de mercado comuns que aparecem como ruído antes do nome
+    # Remove outros tokens de mercado comuns
     prefix_tokens = [
         r"BOVESPA",
         r"B3",
         r"FRACIONARIO",
         r"FRACIONÁRIO",
-        r"C(?:\s+FRACIONARIO)?",
+        r"VISTA",
         r"C/V",
         r"NEGOCIAÇÃO",
         r"NEGOCIACAO",
         r"COTACAO",
     ]
     prefix_re = re.compile(r"^(?:" + r"|".join(prefix_tokens) + r")\b[\s\-]*", re.IGNORECASE)
-    # Aplicar repetidamente para remover sequências como 'BOVESPA C FRACIONARIO'
+    # Aplicar repetidamente para remover sequências
     prev = None
     while prev != s:
         prev = s
         s = prefix_re.sub("", s)
 
     # Remove sufixos com símbolos estranhos (ex: @#) e colunas numéricas ao final
-    # First remove stray symbol clusters
     s = re.sub(r"[\@\#\*\|]+", "", s)
-    # Then remove trailing sequences that look like numeric columns: ' 1 48,82 48,82 D'
+    # Remove trailing sequences: ' 1 48,82 48,82 D'
     s = re.sub(r"\s+\d+[\d\s,\.\-\/]*[A-Za-z]?$", "", s)
 
     # Remove leading/trailing punctuation and extra spaces
