@@ -1,6 +1,7 @@
 import pdfplumber
 import pandas as pd
 import re
+import difflib
 import os
 import zipfile
 import logging
@@ -138,6 +139,57 @@ def _normalize_number(text):
     return s
 
 
+def _extract_operations_from_text(text, data_pregao, ticker_mapping):
+    """Extrai operações de negociação diretamente do texto (fallback para tabelas faltantes).
+    
+    Padrão típico em notas de corretagem:
+    1-BOVESPA C FRACIONARIO 01/00 NOME DO ATIVO ON NM 1 40,00 40,00 D
+    
+    Busca por: '1-BOVESPA' seguido de dados e retorna lista de operações encontradas.
+    """
+    operacoes = []
+    
+    if not text or '1-BOVESPA' not in text:
+        return operacoes
+    
+    # Padrão: 1-BOVESPA seguido de operação C/V, tipo, prazo, nome ativo, qtd, preço, preço, D/C
+    # Regex: 1-BOVESPA\s+([CV])\s+(\w+)\s+(\d{2}/\d{2})\s+(.+?)\s+(\d+(?:[.,]\d+)?)\s+(\d+(?:[.,]\d+)?)\s+(\d+(?:[.,]\d+)?)\s+([DC])
+    pattern = r'1-BOVESPA\s+([CV])\s+(\w+)\s+(\d{2}/\d{2})\s+([A-Z\s]+?)\s+(\d+(?:[.,]\d+)?)\s+(\d+(?:[.,]\d+)?)\s+(\d+(?:[.,]\d+)?)\s+([DC])'
+    
+    for match in re.finditer(pattern, text, re.IGNORECASE):
+        try:
+            operacao = match.group(1).upper()
+            ativo_nome = match.group(4).strip()
+            
+            # Os últimos 3 números são: quantidade, preço/ajuste, valor da operação
+            # Queremos quantidade e preço (primeiro dos 3 números)
+            qty_str = match.group(5)
+            price_str = match.group(6)
+            
+            # Extrai ticker do nome do ativo
+            ticker = _extract_ticker_from_cells([ativo_nome], ticker_mapping)
+            if not ticker:
+                continue
+            
+            quantidade = _normalize_number(qty_str)
+            preco = _normalize_number(price_str)
+            
+            if not quantidade or not preco:
+                continue
+            
+            operacoes.append({
+                "Data": data_pregao,
+                "Ticker": ticker,
+                "Operação": operacao,
+                "Quantidade": quantidade,
+                "Preço": preco
+            })
+        except Exception:
+            continue
+    
+    return operacoes
+
+
 def _is_likely_header(cells):
     """Verifica se a linha parece ser um cabeçalho (nomes de colunas)."""
     if not cells:
@@ -213,34 +265,142 @@ def _is_valid_data_row(cells, is_negotiation_table=False):
     return has_number
 
 
+def _normalize_text_for_comparison(text: str) -> str:
+    """Normaliza texto para comparação fuzzy de nomes de ativos.
+    
+    Remove espaços extras, converte para maiúsculas, remove caracteres especiais.
+    Exemplo: "SUZANO PAPEL ON NM" -> "SUZANO PAPEL ON NM" (sem mudança, mas padronizado)
+    Exemplo: "SUZANOPAPEL ONNM" -> "SUZANO PAPEL ON NM" (após tokenização)
+    """
+    # Converte para maiúsculas
+    text = text.upper().strip()
+    
+    # Remove múltiplos espaços
+    text = re.sub(r'\s+', ' ', text)
+    
+    # Remove hífen (algumas variações podem usar hífen)
+    text = text.replace('-', ' ')
+    
+    # Remove caracteres especiais mantendo apenas letras, números e espaço
+    text = re.sub(r'[^A-Z0-9\s]', '', text)
+    
+    # Remove espaços novamente se criados pela remoção de caracteres
+    text = re.sub(r'\s+', ' ', text).strip()
+    
+    return text
+
+def _extract_words_from_asset_name(text: str) -> set:
+    """Extrai palavras significativas de um nome de ativo.
+    
+    Remove stopwords comuns e retorna um conjunto de palavras principais.
+    Exemplo: "SUZANO PAPEL ON NM" -> {"SUZANO", "PAPEL", "ON", "NM"}
+    """
+    # Palavras comuns em tickers B3 que geralmente não ajudam na identificação
+    stopwords = {"ON", "PN", "NM", "N1", "N2", "ED", "EDUC", "PREFER", "ORDINARIA"}
+    
+    text = _normalize_text_for_comparison(text)
+    words = set(text.split())
+    
+    # Remove stopwords, mas mantém pelo menos algo
+    significant_words = words - stopwords
+    if significant_words:
+        return significant_words
+    return words
+
+def _fuzzy_match_asset_name(cell_text: str, mapping_name: str) -> bool:
+    """Faz correspondência fuzzy entre nome de ativo da célula e nome no mapeamento.
+    
+    Usa intersecção de palavras principais. Se pelo menos 70% das palavras
+    principais do mapeamento estão presentes na célula, considera um match.
+    
+    Exemplos:
+    - "SUZANO PAPEL ON NM" vs "SUZANO ON NM" -> True (78% match)
+    - "SUZANO PAPEL ON NM" vs "SUZANOPAPEL ONNM" -> True (wordset match)
+    - "SUZANO PAPEL ON NM" vs "PETROBRAS ON" -> False (0% overlap)
+    """
+    cell_words = _extract_words_from_asset_name(cell_text)
+    mapping_words = _extract_words_from_asset_name(mapping_name)
+    
+    if not mapping_words:
+        return False
+    
+    # Calcula intersecção de palavras
+    common_words = cell_words.intersection(mapping_words)
+    match_percentage = len(common_words) / len(mapping_words)
+    
+    # Aceita match se pelo menos 70% das palavras mapeadas estão presentes
+    # OU se há pelo menos 2 palavras em comum (para evitar falsos positivos)
+    return match_percentage >= 0.70 or len(common_words) >= 2
+
+
+def _string_similarity(a: str, b: str) -> float:
+    """Retorna similaridade entre duas strings (0..1) usando SequenceMatcher."""
+    if not a or not b:
+        return 0.0
+    a_norm = _normalize_text_for_comparison(a)
+    b_norm = _normalize_text_for_comparison(b)
+    # Use ratio direto
+    return difflib.SequenceMatcher(None, a_norm, b_norm).ratio()
+
 def _extract_ticker_from_cells(cells, ticker_mapping=None):
     """
     Extrai ticker da linha, buscando padrão B3 ou nome de ativo conhecido.
     
     Estratégia:
     1. Procura por padrão ticker B3 (4 letras + 2 dígitos)
-    2. Busca em DE_PARA_TICKERS (hardcoded)
-    3. Busca em ticker_mapping (carregado de resouces/tickerMapping.properties)
+    2. Busca em DE_PARA_TICKERS (hardcoded) com correspondência exata
+    3. Busca em DE_PARA_TICKERS (hardcoded) com correspondência fuzzy
+    4. Busca em ticker_mapping com correspondência exata
+    5. Busca em ticker_mapping com correspondência fuzzy
     """
     for cell in cells:
         cell_str = str(cell).strip()
+        if not cell_str:
+            continue
         
-        # Tenta padrão ticker B3 (4 letras + 2 dígitos)
+        # Passo 1: Tenta padrão ticker B3 (4 letras + 2 dígitos)
         match = re.search(r'[A-Z]{4}\d{2}', cell_str)
         if match:
             return match.group(0)
         
-        # Tenta encontrar nome conhecido de ativo (DE_PARA hardcoded)
+        cell_str_normalized = _normalize_text_for_comparison(cell_str)
+        
+        # Passo 2: Tenta correspondência exata em DE_PARA (hardcoded)
         for nome, ticker in DE_PARA_TICKERS.items():
-            if nome.upper() in cell_str.upper():
+            if _normalize_text_for_comparison(nome) == cell_str_normalized:
                 return ticker
         
-        # Tenta ticker_mapping (carregado de arquivo de configuração)
+        # Passo 3: Tenta correspondência fuzzy em DE_PARA (hardcoded)
+        for nome, ticker in DE_PARA_TICKERS.items():
+            if _fuzzy_match_asset_name(cell_str, nome):
+                return ticker
+        
+        # Passo 4: Tenta correspondência exata em ticker_mapping
         if ticker_mapping:
             for nome, ticker in ticker_mapping.items():
-                if nome.upper() in cell_str.upper():
+                if _normalize_text_for_comparison(nome) == cell_str_normalized:
+                    return ticker
+        
+        # Passo 5: Tenta correspondência fuzzy em ticker_mapping
+        if ticker_mapping:
+            for nome, ticker in ticker_mapping.items():
+                if _fuzzy_match_asset_name(cell_str, nome):
                     return ticker
     
+        # Passo 6: Última tentativa - correspondência por similaridade de string
+        # (cobre erros de digitação como 'BRASKEN' vs 'BRASKEM')
+        try:
+            for nome, ticker in DE_PARA_TICKERS.items():
+                sim = _string_similarity(cell_str, nome)
+                if sim >= 0.85:
+                    return ticker
+            if ticker_mapping:
+                for nome, ticker in ticker_mapping.items():
+                    sim = _string_similarity(cell_str, nome)
+                    if sim >= 0.85:
+                        return ticker
+        except Exception:
+            pass
     # Se não encontrou padrão, retorna None (linha provavelmente não é válida)
     return None
 
@@ -446,6 +606,31 @@ def processar_pdf(pdf_file, senha=None):
                                 except Exception as e:
                                     logger.debug(f"   ⚠️  Erro ao extrair linha: {str(e)}")
                                     continue
+                    
+                    # FALLBACK: Extrair operações diretamente do texto como backup
+                    # Isso trata casos onde pdfplumber falha ao extrair todas as linhas das tabelas
+                    # (ex: operações do meio ficam faltando na divisão de tabelas)
+                    if data_pregao:
+                        operacoes_texto = _extract_operations_from_text(texto_topo, data_pregao, ticker_mapping)
+                        
+                        # Criar assinatra de operações já extraídas (Data + Ticker + Quantidade + Preço)
+                        # para evitar duplicatas
+                        operacoes_existentes = set()
+                        for op in dados_extraidos:
+                            sig = (op.get('Data'), op.get('Ticker'), op.get('Quantidade'), op.get('Preço'))
+                            operacoes_existentes.add(sig)
+                        
+                        # Adicionar apenas operações novas do texto
+                        novas_operacoes = 0
+                        for op in operacoes_texto:
+                            sig = (op.get('Data'), op.get('Ticker'), op.get('Quantidade'), op.get('Preço'))
+                            if sig not in operacoes_existentes:
+                                dados_extraidos.append(op)
+                                novas_operacoes += 1
+                        
+                        if novas_operacoes > 0:
+                            logger.debug(f"   ℹ️  Adicionadas {novas_operacoes} operação(ões) extraída(s) do texto")
+                            registros_pagina += novas_operacoes
                     
                     if registros_pagina > 0:
                         logger.debug(f"   ✓ Página {num_pagina}/{total_paginas}: {registros_pagina} registro(s) extraído(s)")

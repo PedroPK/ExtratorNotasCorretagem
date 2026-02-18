@@ -67,30 +67,71 @@ class TickerMapper:
         Gera ticker usando heurísticas simples
         
         Regras:
-        - Pegue as primeiras 4 letras (ou 5) da empresa
+        - Pegue as primeiras 4 letras da empresa (ou ajuste conforme caso especial)
         - Adicione sufixo (3=ON, 4/5=PN, etc)
         
         Exemplos:
         - "Embraer" + ON → "EMBR3"
         - "Suzano" + ON → "SUZB3"
-        - "Ultrap" + ON → "UGPA3"
+        - "Ultrapar" + ON → "UGPA3"
         """
         if not sufixo:
             return None
         
         empresa_upper = empresa.upper()
 
-        # Alguns casos especiais conhecidos
+        # Casos especiais conhecidos (principais companies da B3)
         especiais = {
             'EMBRAER': ('EMBR', 3),
             'ULTRAPAR': ('UGPA', 3),
             'SUZANO': ('SUZB', 3),
             'BRASKEN': ('BRKM', 5),
+            'BRASKEM': ('BRKM', 5),
             'PETROBRAS': ('PETR', 3),
             'VALE': ('VALE', 3),
             'COSAN': ('CSAN', 3),
             'CESP': ('CESP', 6),
             'BANCO DO BRASIL': ('BBAS', 3),
+            'B2W': ('BTOW', 3),
+            'B2W DIGITAL': ('BTOW', 3),
+            'BRADESPAR': ('BRAP', 4),
+            'BRF': ('BRFS', 3),
+            'CCR': ('CCRO', 3),
+            'CEMIG': ('CMIG', 4),
+            'CIELO': ('CIEL', 3),
+            'COPEL': ('CPLE', 3),
+            'CVC': ('CVCB', 3),
+            'CVC BRASIL': ('CVCB', 3),
+            'ECORODOVIAS': ('ECOR', 3),
+            'ELETROBRAS': ('ELET', 3),
+            'ENERGIAS': ('ENER', 3),
+            'FLEURY': ('FLRY', 3),
+            'FORJA TAURUS': ('FORJ', 3),
+            'GERDAU': ('GGBR', 4),
+            'GERDAU MET': ('GOAU', 4),
+            'GOL': ('GOLL', 4),
+            'HYPERA': ('HYPE', 3),
+            'JBS': ('JBSS', 3),
+            'KROTON': ('KROT', 3),
+            'LOG COM PROP': ('LOGG', 3),
+            'LOJAS RENNER': ('LREN', 3),
+            'MAGAZ LUIZA': ('MGLU', 3),
+            'MARFRIG': ('MBRF', 3),
+            'MRV': ('MRVE', 3),
+            'QUALICORP': ('QUAL', 3),
+            'RAIADROGASIL': ('RADL', 3),
+            'SABESP': ('SBSP', 3),
+            'SID NACIONAL': ('CSNA', 3),
+            'SMILES': ('SMIL', 3),
+            'TELEF BRASIL': ('VIVT', 3),
+            'VIAVAREJO': ('VIAV', 3),
+            'USIMINAS': ('USIM', 3),
+            'ALUPAR': ('ALUP', 3),
+            'AMBEV': ('ABEV', 3),
+            'ITAÚ': ('ITUB', 4),
+            'ITAÚSA': ('ITSA', 4),
+            'NATURA': ('NTCO', 4),
+            'ODONTOPREV': ('ODNT', 3),
         }
         
         # Tenta encontrar nos especiais
@@ -99,8 +140,8 @@ class TickerMapper:
                 return f"{prefixo}{sufixo_correto}"
         
         # Heurística: construir prefixo a partir das palavras significativas
-        # Remove palavras genéricas (DO/DA/DE/E/S/A/SA)
-        stopwords = {'DO', 'DA', 'DE', 'E', 'S', 'A', 'SA', 'S/A'}
+        # Remove palavras genéricas
+        stopwords = {'DO', 'DA', 'DE', 'E', 'S', 'A', 'SA', 'S/A', 'ON', 'PN', 'PNA', 'PNB', 'DR', 'NM', 'N1', 'N2'}
         words = [w for w in re.split(r"\s+", empresa_upper) if w and w not in stopwords]
         join = ''.join(words)
         if not join:
@@ -122,14 +163,13 @@ class TickerMapper:
             return None
 
         if requests is None:
-            # requests não disponível no ambiente — não tentar lookup web
             return None
 
         headers = {
             'User-Agent': 'Mozilla/5.0 (compatible; ExtratorNotas/1.0; +https://github.com/pedropk)'
         }
 
-        # 1) Tentar Yahoo Finance search API (retorna JSON com 'quotes')
+        # 1) Tentar Yahoo Finance search API
         try:
             q = requests.utils.requote_uri(empresa_q)
             url = f'https://query2.finance.yahoo.com/v1/finance/search?q={q}&quotesCount=10&newsCount=0'
@@ -141,12 +181,8 @@ class TickerMapper:
                     for item in quotes:
                         symbol = item.get('symbol', '')
                         exch = item.get('exchange', '')
-                        shortname = item.get('shortname', '') or item.get('longname', '')
-                        # Prioriza símbolos do Brasil (terminam com .SA)
                         if symbol.endswith('.SA'):
-                            # Remove sufixo .SA
                             return symbol.replace('.SA', '')
-                        # Em alguns casos o símbolo já é BR- prefixed; tenta extrair caso seja B3
                         if exch and 'SA' in exch.upper() and re.search(r'[A-Z]{1,5}\d', symbol):
                             return symbol
                 except Exception:
@@ -154,21 +190,18 @@ class TickerMapper:
         except Exception:
             pass
 
-        # 2) Tentar Fundamentus (busca por nome)
+        # 2) Tentar Fundamentus
         try:
             f_q = requests.utils.requote_uri(empresa_q)
             funda_url = f'https://fundamentus.com.br/busca.php?search={f_q}'
             r = requests.get(funda_url, headers=headers, timeout=8)
             if r.status_code == 200 and 'html' in r.headers.get('Content-Type', ''):
-                # Busca por padrão de ticker no HTML
-                # Procura por padrões como 'QUAL3' ou 'EMBR3' (4 letras + dígito)
                 m = re.search(r'([A-Z]{3,5}\d)', r.text)
                 if m:
                     return m.group(1)
         except Exception:
             pass
 
-        # 3) Nenhum resultado confiável
         return None
     
     def load_existing_mapping(self):
@@ -220,7 +253,7 @@ class TickerMapper:
         # 2. Parseia nome
         empresa, tipo, sufixo = self.parse_asset_name(asset_description)
         
-        # 3. Tenta web scraping (futuro)
+        # 3. Tenta web scraping
         ticker = self.search_b3_api(empresa)
         
         # 4. USA heurística como fallback
@@ -278,24 +311,23 @@ def main():
     mapper = TickerMapper()
 
     if args.from_pdf:
-        # Importa coletor reutilizável (garante que pasta src/ esteja no sys.path)
+        # Importa coletor reutilizável
         try:
             src_dir = os.path.dirname(__file__)
             if src_dir not in sys.path:
                 sys.path.insert(0, src_dir)
             from collect_asset_descriptions import collect_descriptions_from_path
         except Exception:
-            print('✗ Não foi possível importar collect_asset_descriptions. Verifique se está em src/ e importável.')
+            print('✗ Não foi possível importar collect_asset_descriptions.')
             print('  Dica: instale dependências com: python3 -m pip install -r resouces/requirements.txt')
             sys.exit(1)
         print(f"📄 Coletando descrições a partir das Notas (ano={args.year})...")
 
-        # Verifica dependências essenciais antes de continuar
+        # Verifica dependências essenciais
         try:
             import pdfplumber  # type: ignore
         except Exception:
-            print('✗ Dependência ausente: pdfplumber. Instale com: python3 -m pip install pdfplumber')
-            print('  Ou execute: python3 -m pip install -r resouces/requirements.txt')
+            print('✗ Dependência ausente: pdfplumber.')
             sys.exit(1)
         try:
             descricoes = collect_descriptions_from_path(year=args.year)
@@ -305,13 +337,12 @@ def main():
 
         if not descricoes:
             print('⚠️  Nenhuma descrição encontrada nas Notas para o filtro especificado')
-            print('  Verifique se os PDFs corretos estão em resouces/inputNotasCorretagem ou passe --input PATH ao coletor')
             sys.exit(0)
 
-        # Gera mapeamento a partir das descrições coletadas
+        # Gera mapeamento
         mapper.generate_from_pdf_descriptions(descricoes)
 
-        # Se solicitado, salva também as descrições coletadas em arquivo
+        # Salva descrições coletadas
         if args.output:
             out = args.output
         else:
@@ -327,7 +358,7 @@ def main():
         print(f"✓ Descrições salvas em: {out}")
         return
 
-    # Default: executa exemplos embutidos (modo de teste rápido)
+    # Default: exemplos embutidos
     exemplos = [
         "Embraer ON NM",
         "Ultrapar ON NM",

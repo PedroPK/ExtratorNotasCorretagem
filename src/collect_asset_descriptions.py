@@ -20,6 +20,7 @@ def normalize_description(desc: str) -> str:
 
     Objetivos:
     - Remover prefixos numéricos e tokens de mercado (ex: '1-BOVESPA C FRACIONARIO')
+    - Remover prefixo "V FRACIONARIO" (que indica operação fracionária, não é parte do ativo)
     - Remover sufixos com anotações e colunas numéricas (ex: '@# 1 48,82 48,82 D')
     - Colapsar espaços e limpar pontuação redundante
     - Preservar sufixos de série como ON/PN/PNA/PNB/DR e opcionalmente NM
@@ -34,6 +35,10 @@ def normalize_description(desc: str) -> str:
 
     # Remove prefixos numéricos tipo '1-' ou '01 -'
     s = re.sub(r"^\s*\d+[\-\s]*", "", s)
+
+    # Remove "V FRACIONARIO" ou "V FRACIONÁRIO" do início (indica operação fracionária)
+    # Deve ser feito primeiro, antes de outros prefixos, para evitar deixar "FRACIONARIO" sozinho
+    s = re.sub(r"^V(?:\s+FRACIONARIO|\s+FRACIONÁRIO)\b[\s]*", "", s, flags=re.IGNORECASE)
 
     # Remove tokens de mercado comuns que aparecem como ruído antes do nome
     prefix_tokens = [

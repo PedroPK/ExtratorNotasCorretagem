@@ -1,5 +1,5 @@
 1. Gerar um XLSX ao invés de um CSV - DONE
-2. Gerar uma aba adicional com dados por Ano, Mês, Dia, ou fazer uma extração em árvore.
+2. Gerar uma aba adicional com dados por Ano, Mês, Dia, ou fazer uma extração em árvore. - DONE
 3. Fazer com que a barra de Progresso seja exibida uma única vez, no rodapé do terminal
 4. Calcular os Preços Médios de cada Ativo
 5. Gerar Gráficos de Alocação.
@@ -12,3 +12,4 @@
 12. Escolher que anos desejamos processar. - DONE 
 13. Implantar o SonarQube ou outra ferramenta de SAST para Python
 14. Implementar Testes.
+15. Gerar estatisticas de negociação, como ativos mais negociados, quantidade de ativos negociados desde o começo, volume de compras e vendas somado, gráficos de distribuição, histogramas, meses com maior volume de negociações. etc.
