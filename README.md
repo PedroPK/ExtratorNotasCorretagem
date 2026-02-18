@@ -70,7 +70,7 @@ O arquivo **`resouces/application.properties`** contém todas as configurações
 
 ```properties
 # Senha para PDFs protegidos
-pdf.password=454
+pdf.password=[SUA_SENHA_AQUI]
 
 # Nível de log (DEBUG, INFO, WARNING)
 logging.level=INFO
