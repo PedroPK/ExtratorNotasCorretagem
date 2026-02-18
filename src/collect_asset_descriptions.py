@@ -37,18 +37,23 @@ def normalize_description(desc: str) -> str:
     s = re.sub(r"^\s*\d+[\-\s]*", "", s)
 
     # Remove prefixos de operação e tipo que não são parte do ativo
-    # Padrões como:
-    # - "C FRACIONARIO" ou "C VISTA" (tipos de operação)
-    # - "V FRACIONARIO" ou "V VISTA" (venda em modo específico)
-    # - "RV LISTADO C FRACIONARIO" (reverso)
-    # Esses podem ter números entre eles (ex: "C FRACIONARIO 2 TELEF")
+    # Padrões mais robustos para capturar variações:
+    # - "NB3 RV LISTADO C FRACIONARIO" etc
+    # - "RV LISTADO V VISTA", "RV LISTADO V FRACIONARIO"
+    # - "RV LISTADO C FRACIONARIO"
+    # - "C FRACIONARIO", "C VISTA"
+    # - "V FRACIONARIO", "V VISTA"
+    # - "RV LISTADO"
     operation_patterns = [
-        r"^RV\s+LISTADO\s+C\s+FRACIONARIO\b[\d\s]*",  # RV LISTADO C FRACIONARIO
-        r"^C\s+FRACIONARIO\b[\d\s]*",                 # C FRACIONARIO (com número opcional)
-        r"^C\s+VISTA\b[\d\s]*",                        # C VISTA
-        r"^V\s+FRACIONARIO\b[\d\s]*",                 # V FRACIONARIO
-        r"^V\s+VISTA\b[\d\s]*",                        # V VISTA
-        r"^RV\s+LISTADO\b[\s]*",                       # RV LISTADO
+        r"^NB3\s+RV\s+LISTADO\s+C\s+FRACIONARIO\s+",  # NB3 RV LISTADO C FRACIONARIO
+        r"^RV\s+LISTADO\s+V\s+VISTA\s+",               # RV LISTADO V VISTA
+        r"^RV\s+LISTADO\s+V\s+FRACIONARIO\s+",         # RV LISTADO V FRACIONARIO
+        r"^RV\s+LISTADO\s+C\s+FRACIONARIO\s+",         # RV LISTADO C FRACIONARIO
+        r"^C\s+FRACIONARIO\s+",                         # C FRACIONARIO (remove também o espaço)
+        r"^C\s+VISTA\s+",                               # C VISTA (remove também o espaço)
+        r"^V\s+FRACIONARIO\s+",                         # V FRACIONARIO (remove também o espaço)
+        r"^V\s+VISTA\s+",                               # V VISTA (remove também o espaço)
+        r"^RV\s+LISTADO\s+",                            # RV LISTADO (remove também o espaço)
     ]
     for pattern in operation_patterns:
         s = re.sub(pattern, "", s, flags=re.IGNORECASE)
