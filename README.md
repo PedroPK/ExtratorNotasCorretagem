@@ -486,6 +486,147 @@ if sim >= 0.85:
 
 ---
 
+## 🧹 Sanitização e Validação de Tickers
+
+O script `sanitize_tickers.py` valida e corrige automaticamente os mapeamentos de tickers contra as regras de nomenclatura da B3.
+
+### Por que Sanitizar?
+
+A B3 segue regras rigorosas de nomenclatura para tickers:
+- **ON** (Ordinária) deve terminar em **3**
+- **PN/PNA** (Preferencial) deve terminar em **4 ou 5**
+- **PNB** (Preferencial B) deve terminar em **5 ou 6**
+- Exceções legítimas: ISINs (0P*), fundos e classes especiais
+
+Mapeamentos incorretos podem comprometer a qualidade dos dados extraídos.
+
+### Como Usar
+
+#### Modo 1: Apenas Validar (Verificar Problemas)
+```bash
+python3 src/sanitize_tickers.py
+```
+
+Exibe todos os tickers que não seguem as regras B3:
+```
+🔍 VALIDANDO MAPEAMENTOS DE TICKERS
+================================================================================
+
+❌ JBS ON                            → JBSS32     (ON deve terminar em 3 (não em 2))
+
+Total de mapeamentos analisados: 225
+Total de problemas encontrados: 1
+```
+
+#### Modo 2: Corrigir Automaticamente (--fix)
+```bash
+python3 src/sanitize_tickers.py --fix
+```
+
+Detecta problemas E corrige usando uma lista de exceções conhecidas:
+```
+🔍 VALIDANDO MAPEAMENTOS DE TICKERS
+================================================================================
+
+❌ JBS ON                            → JBSS32     (ON deve terminar em 3 (não em 2))
+   ✓ Corrigido para: JBSS3
+
+Aplicando 1 correção(ões)...
+  ✓ JBS ON                           JBSS32     → JBSS3
+
+✅ Arquivo atualizado: resouces/tickerMapping.properties
+```
+
+#### Modo 3: Gerar Relatório em CSV (--report)
+```bash
+python3 src/sanitize_tickers.py --report
+```
+
+Cria um arquivo CSV com todos os problemas encontrados:
+```
+📄 Gerando relatório: resouces/ticker_sanitization_report_20260219_184959.csv
+✓ Relatório criado com 4 entrada(s)
+```
+
+**Conteúdo do CSV:**
+```csv
+Descrição,Ticker Atual,Tipo de Problema,Sugestão
+JBS ON,JBSS32,ON deve terminar em 3 (não em 2),JBSS3
+ABC BRASIL PN,ABCB2,PN deve terminar em 4/5/6 (não em 2),ABCB4
+EQUATORIAL ON,EQPA5,⚠️ ON termina em 5 (esperado 3 - possível classe especial),EQPA3
+UNIPAR ON,UNIP6,⚠️ ON termina em 6 (esperado 3 - possível classe especial),UNIP3
+```
+
+### Exceções Conhecidas e Classes Especiais
+
+O script reconhece automaticamente tickers que não seguem o padrão:
+
+| Descrição | Ticker | Tipo | Motivo |
+|-----------|--------|------|--------|
+| BRASIL ON | EVEB31 | ON | FII ou classe especial |
+| CESP ON | CESP6 | ON | Classe especial |
+| COELBA ON | CEEB5 | ON | Classe especial |
+| AZUL PN | 0P0000U99Z | PN | Código ISIN |
+| TIM ON | 0P0001N5CL | ON | Código ISIN |
+| EQUATORIAL ON | EQPA3 | ON | Classe especial |
+| UNIPAR ON | UNIP3 | ON | Classe especial |
+
+**ISINs** (começando com 0P) e **fundos** (terminando em 11) são automaticamente aceitos como exceções.
+
+### Lógica de Correção (--fix)
+
+O script usa uma estratégia de **duas camadas** para corrigir:
+
+1. **Exceções Conhecidas** (prioridade alta)
+   - Se o ativo está na lista de exceções, usa o valor correto dela
+   - Exemplo: JBS ON com erro (JBSS32) → corrigido para JBSS3
+
+2. **Web Scraping via B3 API** (fallback)
+   - Se não achou nas exceções, tenta buscar o ticker correto pela API
+   - Menos confiável pois a B3 API pode retornar valores incorretos
+
+### Adicionando Novas Exceções
+
+Para adicionar novas exceções conhecidas, edite [src/sanitize_tickers.py](src/sanitize_tickers.py#L32):
+
+```python
+self.exceptions = {
+    'BRASIL ON': 'EVEB31',
+    'CESP ON': 'CESP6',
+    # Adicione aqui:
+    'NOVO ATIVO ON': 'NOVO3',  # seu novo mapeamento
+}
+```
+
+Salve e execute novamente com `--fix`.
+
+### Casos de Uso Comuns
+
+**Caso 1: Mapeamento incorreto foi gerado pela API B3**
+```bash
+python3 src/sanitize_tickers.py --fix
+# Corrige automaticamente usando as exceções
+```
+
+**Caso 2: Auditar a integridade dos mapeamentos**
+```bash
+python3 src/sanitize_tickers.py --report
+# Gera CSV com todos os problemas para revisão manual
+```
+
+**Caso 3: Integrar com CI/CD**
+```bash
+python3 src/sanitize_tickers.py
+if [ $? -eq 0 ]; then
+  echo "✅ Tickers validados com sucesso"
+else
+  echo "❌ Problemas encontrados nos tickers"
+  exit 1
+fi
+```
+
+---
+
 ## 📄 Mapeamento de Ativos
 
 O mecanismo de mapeamento no arquivo `src/extratorNotasCorretagem.py` converte nomes de ativos em tickers:
@@ -591,5 +732,5 @@ Para dúvidas ou problemas, abra uma issue no GitHub ou envie um email.
 
 ---
 
-**Última atualização:** 15/02/2026  
-**Versão:** 1.0.0
+**Última atualização:** 19/02/2026  
+**Versão:** 1.1.0
