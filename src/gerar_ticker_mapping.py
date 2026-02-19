@@ -21,7 +21,9 @@ class TickerMapper:
     
     def __init__(self):
         self.mapping = {}
+        self.options_mapping = {}
         self.mapping_file = 'resouces/tickerMapping.properties'
+        self.options_file = 'resouces/tickerMapping_options.properties'
         
     def parse_asset_name(self, asset_name: str) -> tuple:
         """
@@ -149,6 +151,29 @@ class TickerMapper:
         prefixo = (join[:4] if len(join) >= 4 else (join.ljust(4, 'X')))
         return f"{prefixo}{sufixo}"
     
+    def _is_option(self, description: str) -> bool:
+        """
+        Detecta se uma descrição é uma opção (não ativo normal)
+        
+        Padrão de opções:
+        - 3-5 caracteres (letras/números) + 1 letra (mês) + 3 dígitos + opcional 'E'
+        Exemplos:
+        - ABEVA135 (ABEV + A + 135)
+        - B3SAB725 (B3SA + B + 725)
+        - BBASK344E (BBAS + K + 344 + E)
+        - BBASB450 (BBAS + B + 450)
+        
+        Não são opções:
+        - BBASO1 (apenas 1 dígito)
+        - BBAST44 (apenas 2 dígitos)
+        - ABEV3 (dígito no final, não letra+dígitos)
+        """
+        if not description:
+            return False
+        # Regex: 3-5 chars (letras/números) + 1 letra + 3 dígitos + opcional E
+        pattern = r'^[A-Z0-9]{3,5}[A-Z]\d{3}E?$'
+        return bool(re.match(pattern, description.strip()))
+    
     def search_b3_api(self, empresa: str) -> Optional[str]:
         """
         Tenta buscar ticker via API pública ou web scraping da B3
@@ -217,10 +242,29 @@ class TickerMapper:
                             desc, ticker = line.split('=', 1)
                             desc = desc.strip()
                             ticker = ticker.strip()
-                            # Normaliza ticker ao carregar
-                            ticker = self._normalize_ticker(ticker, desc)
-                            self.mapping[desc] = ticker
+                            
+                            # Separa opções automáticamente
+                            if self._is_option(desc):
+                                self.options_mapping[desc] = ticker
+                            else:
+                                # Normaliza ticker ao carregar
+                                ticker = self._normalize_ticker(ticker, desc)
+                                self.mapping[desc] = ticker
+                
+                # Carrega também opções pré-existentes
+                if os.path.exists(self.options_file):
+                    with open(self.options_file, 'r', encoding='utf-8') as f:
+                        for line in f:
+                            line = line.strip()
+                            if not line or line.startswith('#'):
+                                continue
+                            if '=' in line:
+                                desc, ticker = line.split('=', 1)
+                                self.options_mapping[desc.strip()] = ticker.strip()
+                
                 print(f"✓ Carregados {len(self.mapping)} mapeamentos existentes")
+                if self.options_mapping:
+                    print(f"✓ Carregadas {len(self.options_mapping)} opções existentes")
             except Exception as e:
                 print(f"⚠️  Erro ao carregar tickerMapping.properties: {str(e)}")
     
@@ -262,14 +306,15 @@ class TickerMapper:
     
     
     def save_mapping(self):
-        """Salva mapeamento em arquivo"""
+        """Salva mapeamento em arquivo (apenas ativos normais, sem opções)"""
         try:
             with open(self.mapping_file, 'w', encoding='utf-8') as f:
                 f.write("# Mapeamento de Descrições de Ativos para Tickers B3\n")
                 f.write("# Formato: DESCRICAO_DO_ATIVO=TICKER\n")
                 f.write("#\n")
                 f.write("# Este arquivo é gerado/atualizado automaticamente pelo script gerar_ticker_mapping.py\n")
-                f.write("# Você pode editar manualmente para corrigir mapeamentos incorretos\n\n")
+                f.write("# Você pode editar manualmente para corrigir mapeamentos incorretos\n")
+                f.write("# Nota: Opções são armazenadas em tickerMapping_options.properties\n\n")
                 
                 for desc, ticker in sorted(self.mapping.items()):
                     f.write(f"{desc}={ticker}\n")
@@ -278,31 +323,63 @@ class TickerMapper:
         except Exception as e:
             print(f"✗ Erro ao salvar tickerMapping.properties: {str(e)}")
     
+    def save_options_mapping(self):
+        """Salva mapeamento de opções em arquivo separado"""
+        if not self.options_mapping:
+            return
+        
+        try:
+            with open(self.options_file, 'w', encoding='utf-8') as f:
+                f.write("# Mapeamento de Opções para Tickers B3\n")
+                f.write("# Formato: OPCAO_DESCRICAO=TICKER\n")
+                f.write("#\n")
+                f.write("# Opções = Contrato futuro de ativos\n")
+                f.write("# Padrão: [TICKER_BASE][MES][PRECO][E?]\n")
+                f.write("# Exemplos: ABEVA135, B3SAB725, BBASK344E\n")
+                f.write("# Este arquivo é gerado/atualizado automaticamente pelo script gerar_ticker_mapping.py\n\n")
+                
+                for desc, ticker in sorted(self.options_mapping.items()):
+                    f.write(f"{desc}={ticker}\n")
+            
+            print(f"✓ Salvos {len(self.options_mapping)} mapeamentos de opções em {self.options_file}")
+        except Exception as e:
+            print(f"✗ Erro ao salvar tickerMapping_options.properties: {str(e)}")
+    
     def map_asset(self, asset_description: str) -> Optional[str]:
         """
         Mapeia descrição de ativo para ticker B3
         
         Estratégia:
-        1. Verifica se já existe no mapeamento
-        2. Tenta buscar via web scraping
-        3. Usa heurística como fallback
-        4. Normaliza ticker (remove F, corrige ON/PN)
+        1. Detecta se é uma opção
+        2. Verifica se já existe no mapeamento
+        3. Tenta buscar via web scraping
+        4. Usa heurística como fallback
+        5. Normaliza ticker (remove F, corrige ON/PN)
         """
-        # 1. Verifica cache
+        # 1. Detecta e separa opções automaticamente
+        if self._is_option(asset_description):
+            # Opções já fazem referência ao ticker base, apenas registra
+            # Extrai ticker base da opção (ABEVA135 → ABEV)
+            base_ticker_prefix = asset_description[:4]
+            self.options_mapping[asset_description] = f"{base_ticker_prefix}3"  # Default
+            print(f"  ℹ️  {asset_description:30} → OPÇÃO (separada)")
+            return None
+        
+        # 2. Verifica cache (apenas ativos normais)
         if asset_description in self.mapping:
             return self.mapping[asset_description]
         
-        # 2. Parseia nome
+        # 3. Parseia nome
         empresa, tipo, sufixo = self.parse_asset_name(asset_description)
         
-        # 3. Tenta web scraping
+        # 4. Tenta web scraping
         ticker = self.search_b3_api(empresa)
         
-        # 4. USA heurística como fallback
+        # 5. USA heurística como fallback
         if not ticker:
             ticker = self.generate_ticker_heuristic(empresa, tipo, sufixo)
         
-        # 5. Normaliza ticker
+        # 6. Normaliza ticker
         if ticker:
             ticker = self._normalize_ticker(ticker, asset_description)
             self.mapping[asset_description] = ticker
@@ -331,11 +408,15 @@ class TickerMapper:
             self.map_asset(desc)
         
         self.save_mapping()
+        self.save_options_mapping()
         
         print("\n" + "="*70)
         print(f"✅ Mapeamento atualizado!")
         print(f"   Total de ativos mapeados: {len(self.mapping)}")
         print(f"   Arquivo: {self.mapping_file}")
+        if self.options_mapping:
+            print(f"   Total de opções mapeadas: {len(self.options_mapping)}")
+            print(f"   Arquivo: {self.options_file}")
         print("="*70 + "\n")
 
 
