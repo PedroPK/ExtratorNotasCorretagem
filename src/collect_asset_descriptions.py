@@ -83,7 +83,7 @@ def normalize_description(desc: str) -> str:
     s = re.sub(r"\s+\d+[\d\s,\.\-\/]*[A-Za-z]?$", "", s)
 
     # Remove leading/trailing punctuation and extra spaces
-    s = s.strip(" \t\n\r\x0b\f\-\.,:;\(\)")
+    s = s.strip(" \t\n\r\x0b\f\-\.,;:()")
     s = re.sub(r"\s+", " ", s)
 
     return s
@@ -106,10 +106,18 @@ def _extract_description_from_row(cells: List[str]) -> Optional[str]:
 
     # Busca por padrões em todas as células
     row_text = ' '.join([str(c or '') for c in cells])
-    # Padrão: palavra(s) + (ON|PN|PNA|PNB|DR) possivelmente seguido de 'NM' ou 'N1'
-    match = re.search(r"([A-Za-zÀ-ÿ0-9\.\- ]{2,60}?)\s+(ON|PN|PNA|PNB|DR)\b(?:\s+NM|\s+N1|\s+N2)?", row_text, re.IGNORECASE)
+    # Padrão: palavra(s) + (ON|PN|PNA|PNB|DR) opcionalmente seguido de NM, N1, N2, etc
+    match = re.search(r"([A-Za-zÀ-ÿ0-9\.\-\s]{2,60}?)\s+(ON|PN|PNA|PNB|DR)(?:\s+(NM|N1|N2|N3))?", row_text, re.IGNORECASE)
     if match:
-        return normalize_description(match.group(0).strip())
+        empresa = match.group(1).strip()
+        tipo = match.group(2).upper()
+        sufixo = match.group(3).upper() if match.group(3) else None
+        # Reconstrói com todos os componentes
+        if sufixo:
+            desc_result = f"{empresa} {tipo} {sufixo}"
+        else:
+            desc_result = f"{empresa} {tipo}"
+        return normalize_description(desc_result)
 
     # Fallback: procura por palavras com mais de 3 letras juntas (possível nome do ativo)
     match2 = re.search(r"([A-Za-zÀ-ÿ]{3,}(?:\s+[A-Za-zÀ-ÿ]{2,}){0,3})", row_text)

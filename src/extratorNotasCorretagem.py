@@ -153,8 +153,8 @@ def _extract_operations_from_text(text, data_pregao, ticker_mapping):
         return operacoes
     
     # Padrão: 1-BOVESPA seguido de operação C/V, tipo, prazo, nome ativo, qtd, preço, preço, D/C
-    # Regex: 1-BOVESPA\s+([CV])\s+(\w+)\s+(\d{2}/\d{2})\s+(.+?)\s+(\d+(?:[.,]\d+)?)\s+(\d+(?:[.,]\d+)?)\s+(\d+(?:[.,]\d+)?)\s+([DC])
-    pattern = r'1-BOVESPA\s+([CV])\s+(\w+)\s+(\d{2}/\d{2})\s+([A-Z\s]+?)\s+(\d+(?:[.,]\d+)?)\s+(\d+(?:[.,]\d+)?)\s+(\d+(?:[.,]\d+)?)\s+([DC])'
+    # CORRIGIDO: ([A-Z0-9\s]+?) para capturar nomes com números (ex: B2W, N1)
+    pattern = r'1-BOVESPA\s+([CV])\s+(\w+)\s+(\d{2}/\d{2})\s+([A-Z0-9\s]+?)\s+(\d+(?:[.,]\d+)?)\s+(\d+(?:[.,]\d+)?)\s+(\d+(?:[.,]\d+)?)\s+([DC])'
     
     for match in re.finditer(pattern, text, re.IGNORECASE):
         try:

@@ -22,8 +22,11 @@ class TickerMapper:
     def __init__(self):
         self.mapping = {}
         self.options_mapping = {}
+        self.unmapped_mapping = {}  # Descrições não mapeadas para revisão manual
+        self.locked_entries = set()  # Mapeamentos carregados do arquivo (proteger contra sobrescrita)
         self.mapping_file = 'resouces/tickerMapping.properties'
         self.options_file = 'resouces/tickerMapping_options.properties'
+        self.unmapped_file = 'resouces/tickerMapping_unmapped.properties'  # Para revisão manual
         
     def parse_asset_name(self, asset_name: str) -> tuple:
         """
@@ -151,6 +154,19 @@ class TickerMapper:
         prefixo = (join[:4] if len(join) >= 4 else (join.ljust(4, 'X')))
         return f"{prefixo}{sufixo}"
     
+    def _normalize_description_suffixes(self, description: str) -> str:
+        """
+        Remove sufixos opcionais (NM, N1, N2, N3) de descrições
+        
+        Exemplos:
+        - "FLEURY ON NM" → "FLEURY ON"
+        - "BRASKEM PNA N1" → "BRASKEM PNA"
+        - "B2W DIGITAL ON NM" → "B2W DIGITAL ON"
+        """
+        # Remove sufixos NM, N1, N2, N3 que vêm após ON/PN/PNA/PNB/DR
+        normalized = re.sub(r'\s+(NM|N1|N2|N3)\s*$', '', description.strip(), flags=re.IGNORECASE)
+        return normalized.strip()
+    
     def _is_option(self, description: str) -> bool:
         """
         Detecta se uma descrição é uma opção (não ativo normal)
@@ -250,6 +266,7 @@ class TickerMapper:
                                 # Normaliza ticker ao carregar
                                 ticker = self._normalize_ticker(ticker, desc)
                                 self.mapping[desc] = ticker
+                                self.locked_entries.add(desc)  # Marca como loaded (proteger)
                 
                 # Carrega também opções pré-existentes
                 if os.path.exists(self.options_file):
@@ -345,48 +362,111 @@ class TickerMapper:
         except Exception as e:
             print(f"✗ Erro ao salvar tickerMapping_options.properties: {str(e)}")
     
+    def save_unmapped_mapping(self):
+        """Salva descrições não mapeadas para revisão manual"""
+        if not self.unmapped_mapping:
+            return
+        
+        try:
+            with open(self.unmapped_file, 'w', encoding='utf-8') as f:
+                f.write("# Descrições não mapeadas - PARA REVISÃO MANUAL\n")
+                f.write("# Formato: DESRICAO_DO_ATIVO=TICKER_DESEJADO\n")
+                f.write("#\n")
+                f.write("# Instruções:\n")
+                f.write("# 1. Preencha o TICKER_DESEJADO para as descrições que você conhece\n")
+                f.write("# 2. Deixe em branco (ou comente com #) as que você não conhece\n")
+                f.write("# 3. Execute: python3 review_unmapped_mappings.py\n")
+                f.write("# 4. O script moverá os mapeamentos preenchidos para o arquivo padrão\n")
+                f.write("# 5. Este arquivo será regenerado na próxima execução com novos não mapeados\n\n")
+                
+                for desc, ticker in sorted(self.unmapped_mapping.items()):
+                    # Se ticker estiver vazio, mostra como comentário
+                    if ticker.strip():
+                        f.write(f"{desc}={ticker}\n")
+                    else:
+                        f.write(f"# {desc}=\n")
+            
+            print(f"✓ Salvos {len(self.unmapped_mapping)} mapeamentos não encontrados em {self.unmapped_file}")
+            print(f"  → Revise e preencha os tickers em {self.unmapped_file}")
+            print(f"  → Execute: python3 review_unmapped_mappings.py (para importar mapeamentos preenchidos)")
+        except Exception as e:
+            print(f"✗ Erro ao salvar tickerMapping_unmapped.properties: {str(e)}")
+    
     def map_asset(self, asset_description: str) -> Optional[str]:
         """
         Mapeia descrição de ativo para ticker B3
         
         Estratégia:
         1. Detecta se é uma opção
-        2. Verifica se já existe no mapeamento
-        3. Tenta buscar via web scraping
+        2. Verifica se já existe no mapeamento (exato ou com fallback para versão sem NM/N1/N2)
+        3. Tenta buscar via web scraping (SOMENTE se não houver mapeamento existente)
         4. Usa heurística como fallback
         5. Normaliza ticker (remove F, corrige ON/PN)
         """
+        original_desc = asset_description.strip()
+        
         # 1. Detecta e separa opções automaticamente
-        if self._is_option(asset_description):
+        if self._is_option(original_desc):
             # Opções já fazem referência ao ticker base, apenas registra
             # Extrai ticker base da opção (ABEVA135 → ABEV)
-            base_ticker_prefix = asset_description[:4]
-            self.options_mapping[asset_description] = f"{base_ticker_prefix}3"  # Default
-            print(f"  ℹ️  {asset_description:30} → OPÇÃO (separada)")
+            base_ticker_prefix = original_desc[:4]
+            self.options_mapping[original_desc] = f"{base_ticker_prefix}3"  # Default
+            print(f"  ℹ️  {original_desc:30} → OPÇÃO (separada)")
             return None
         
-        # 2. Verifica cache (apenas ativos normais)
-        if asset_description in self.mapping:
-            return self.mapping[asset_description]
+        # 2. Verifica cache (exato)
+        if original_desc in self.mapping:
+            return self.mapping[original_desc]
+        
+        # 2b. Verifica cache com fallback (sem sufixos NM/N1/N2)
+        normalized_desc = self._normalize_description_suffixes(original_desc)
+        if normalized_desc != original_desc and normalized_desc in self.mapping:
+            # Encontrou versão normalizada, salva ambas as variações
+            ticker = self.mapping[normalized_desc]
+            # Só atualiza se a entrada normalizada estiver locked (vem do arquivo)
+            if normalized_desc in self.locked_entries:
+                self.mapping[original_desc] = ticker
+                self.locked_entries.add(original_desc)  # Marca como locked também
+            return ticker
         
         # 3. Parseia nome
-        empresa, tipo, sufixo = self.parse_asset_name(asset_description)
+        empresa, tipo, sufixo = self.parse_asset_name(original_desc)
         
-        # 4. Tenta web scraping
-        ticker = self.search_b3_api(empresa)
+        # 4. Tenta web scraping SOMENTE se a descrição não estiver locked
+        ticker = None
         
-        # 5. USA heurística como fallback
+        if original_desc not in self.locked_entries:
+            # Verifica se já existe mapeamento para empresa relacionada (locked)
+            # Se existir, confia naquele e não faz web scraping
+            has_locked_company = any(desc.startswith(empresa) for desc in self.locked_entries)
+            
+            if not has_locked_company:
+                # Só faz web scraping se não tiver mapeamento locked da empresa
+                ticker = self.search_b3_api(empresa)
+            else:
+                # Existe mapeamento locked para esta empresa, usa heurística apenas
+                ticker = None
+        
+        # 5. USA heurística como fallback (apenas se não encontrou via web scraping)
         if not ticker:
             ticker = self.generate_ticker_heuristic(empresa, tipo, sufixo)
         
-        # 6. Normaliza ticker
+        # 6. Normaliza ticker E SALVA apenas se não for entrada locked
         if ticker:
-            ticker = self._normalize_ticker(ticker, asset_description)
-            self.mapping[asset_description] = ticker
-            print(f"  ✓ {asset_description:30} → {ticker}")
+            ticker = self._normalize_ticker(ticker, original_desc)
+            if original_desc not in self.locked_entries:
+                self.mapping[original_desc] = ticker
+                print(f"  ✓ {original_desc:30} → {ticker}")
+            else:
+                # Entrada está locked, respeita o valor existente
+                print(f"  ℹ️  {original_desc:30} → {self.mapping[original_desc]} (locked)")
+                return self.mapping[original_desc]
             return ticker
         
-        print(f"  ✗ {asset_description:30} → NÃO MAPEADO")
+        # Não encontrou mapeamento - registra para revisão manual
+        if original_desc not in self.unmapped_mapping:
+            self.unmapped_mapping[original_desc] = ""  # Vazio para preenchimento manual
+        print(f"  ✗ {original_desc:30} → NÃO MAPEADO (marcado para revisão)")
         return None
     
     def generate_from_pdf_descriptions(self, descriptions: list):
@@ -409,6 +489,7 @@ class TickerMapper:
         
         self.save_mapping()
         self.save_options_mapping()
+        self.save_unmapped_mapping()
         
         print("\n" + "="*70)
         print(f"✅ Mapeamento atualizado!")
@@ -417,6 +498,9 @@ class TickerMapper:
         if self.options_mapping:
             print(f"   Total de opções mapeadas: {len(self.options_mapping)}")
             print(f"   Arquivo: {self.options_file}")
+        if self.unmapped_mapping:
+            print(f"   Total de não mapeados: {len(self.unmapped_mapping)}")
+            print(f"   Arquivo: {self.unmapped_file}")
         print("="*70 + "\n")
 
 
