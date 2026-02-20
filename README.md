@@ -706,6 +706,34 @@ Se quiser que eu integre o modo `--from-pdf` diretamente (o script extrairia aut
 
 ## 🔧 Correções Recentes
 
+### v1.1.4 (20/02/2026) - Mapeamento PN N1 para BRADESPAR e GERDAU
+
+**Problema:** Operações de BRADESPAR PN N1 e GERDAU PN N1 estavam sendo mapeadas incorretamente:
+- BRADESPAR PN N1 → BRAP3 (estava como ON) em vez de BRAP4 (correto para PN)
+- GERDAU PN N1 → GGBR3 (estava como ON) em vez de GGBR4 (correto para PN)
+
+**Exemplo do problema:**
+- 14/11/2018: BRADESPAR PN N1 @ 33,40 mapeado como BRAP3 ❌
+- 14/11/2018: GERDAU PN N1 @ 14,85 mapeado como GGBR3 ❌
+
+**Solução:**
+- Adicionados 4 novos mapeamentos em `tickerMapping.properties`:
+  - `BRADESPAR PN N1=BRAP4`
+  - `BRADESPAR PNN1=BRAP4` (variante sem espaço)
+  - `GERDAU PN N1=GGBR4`
+  - `GERDAU PNN1=GGBR4` (variante sem espaço)
+
+**Padrão reconhecido:**
+Empresas brasileiras frequentemente têm múltiplas classes de ações que requerem tickers diferentes:
+- ON (Ordinária) → sufixo 3
+- PN/PNN1 (Preferencial/Preferencial N1) → sufixo 4
+
+Outros exemplos corrigidos anteriormente: ELETROBRAS (ON→ELET3 vs PNB→ELET4), VIAVAREJO (ON→VIAV3 vs UNT N2→VVAR11)
+
+**Impacto:**
+- 14/11/2018: 2 operações agora mapeadas corretamente (BRAP4, GGBR4)
+- Sistema de score-based matching garante que mappings mais específicos (PNN1) ganhem sobre genéricos (PN)
+
 ### v1.1.3 (20/02/2026) - Regex de Extração Melhorado para Caracteres Especiais
 
 **Problema:** Operações que continham o caractere "#" no PDF não estavam sendo extraídas, resultando em perda de dados. Exemplo: 29/10/2018 tinha 15 operações no PDF mas apenas 11 eram extraídas.
@@ -788,6 +816,7 @@ Se quiser que eu integre o modo `--from-pdf` diretamente (o script extrairia aut
 
 | Versão | Data | Mudança Principal |
 |--------|------|---|
+| 1.1.4 | 20/02/2026 | Mappings PN N1 para BRADESPAR e GERDAU |
 | 1.1.3 | 20/02/2026 | Fix regex para caracteres especiais (#) |
 | 1.1.2 | 20/02/2026 | Score-based fuzzy matching para tickers |
 | 1.1.1 | 20/02/2026 | Fix regex operações de texto |
@@ -823,4 +852,4 @@ Para dúvidas ou problemas, abra uma issue no GitHub ou envie um email.
 ---
 
 **Última atualização:** 20/02/2026  
-**Versão:** 1.1.3
+**Versão:** 1.1.4
