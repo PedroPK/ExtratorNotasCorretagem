@@ -706,6 +706,30 @@ Se quiser que eu integre o modo `--from-pdf` diretamente (o script extrairia aut
 
 ## 🔧 Correções Recentes
 
+### v1.1.5 (20/02/2026) - Adição de Mapeamentos para KLABIN
+
+**Problema:** Operação de KLABIN S/A UNT EDJ N2 não estava sendo extraída.
+
+**Causa raiz:** Arquivo `tickerMapping.properties` não continha nenhum mapeamento para KLABIN S/A ou suas variações. O regex extraía corretamente "KLABIN S/A UNT EDJ N2" do PDF, mas sem mapeamento para um ticker válido, a operação era ignorada.
+
+**Exemplo do problema:**
+- 14/11/2018: KLABIN S/A UNT EDJ N2 @ 17,35
+  - Extraído corretamente pelo regex ✓
+  - Mas não mapeado para ticker → Ignorado ❌
+
+**Solução:**
+- Adicionados 5 novos mapeamentos em `tickerMapping.properties`:
+  - `KLABIN ON=KLBN3`
+  - `KLABIN PN=KLBN4`
+  - `KLABIN UNT=KLBN11`
+  - `KLABIN S/A UNT=KLBN11`
+  - `KLABIN S/A UNT EDJ N2=KLBN11` (mapeamento específico para a operação)
+
+**Score-based matching:** O sistema usa score-based fuzzy matching, então "KLABIN S/A UNT EDJ N2" (score 1.0 - perfeito) terá prioridade sobre "KLABIN UNT" (score 0.67) ou "KLABIN PN" (score 0.33).
+
+**Impacto:**
+- 14/11/2018: KLABIN S/A UNT EDJ N2 agora extraído corretamente como KLBN11 ✓
+
 ### v1.1.4 (20/02/2026) - Mapeamento PN N1 para BRADESPAR e GERDAU
 
 **Problema:** Operações de BRADESPAR PN N1 e GERDAU PN N1 estavam sendo mapeadas incorretamente:
@@ -816,6 +840,7 @@ Outros exemplos corrigidos anteriormente: ELETROBRAS (ON→ELET3 vs PNB→ELET4)
 
 | Versão | Data | Mudança Principal |
 |--------|------|---|
+| 1.1.5 | 20/02/2026 | Adição de mappings para KLABIN UNT |
 | 1.1.4 | 20/02/2026 | Mappings PN N1 para BRADESPAR e GERDAU |
 | 1.1.3 | 20/02/2026 | Fix regex para caracteres especiais (#) |
 | 1.1.2 | 20/02/2026 | Score-based fuzzy matching para tickers |
@@ -852,4 +877,4 @@ Para dúvidas ou problemas, abra uma issue no GitHub ou envie um email.
 ---
 
 **Última atualização:** 20/02/2026  
-**Versão:** 1.1.4
+**Versão:** 1.1.5
