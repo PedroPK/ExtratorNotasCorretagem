@@ -13,10 +13,10 @@ class ConfigManager:
     DEFAULT_CONFIGS = {
         'pdf.password': '',
         'logging.level': 'INFO',
-        'output.format': 'csv',
-        'input.folder': '../resouces/inputNotasCorretagem',
-        'output.folder': '../resouces/output',
-        'logs.folder': '../resouces/output/logs'
+        'output.format': 'xlsx',
+        'input.folder': 'resouces/inputNotasCorretagem',
+        'output.folder': 'resouces/output',
+        'logs.folder': 'resouces/output/logs'
     }
     
     def __init__(self, config_file='application.properties'):
@@ -116,16 +116,20 @@ class ConfigManager:
     
     def resolve_path(self, relative_path):
         """
-        Resolve um caminho relativo para absoluto
+        Resolve um caminho relativo para absoluto, sempre baseado na raiz do projeto
         
         Args:
-            relative_path: Caminho relativo
+            relative_path: Caminho relativo (ex: 'resouces/output')
             
         Returns:
-            Caminho absoluto resolvido
+            Caminho absoluto resolvido da raiz do projeto
         """
+        # Obtém o diretório do script (src/)
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        return os.path.join(script_dir, relative_path)
+        # Sobe um nível para a raiz do projeto
+        project_root = os.path.dirname(script_dir)
+        # Combina com o caminho relativo
+        return os.path.join(project_root, relative_path)
 
 
 # Instância global de configuração

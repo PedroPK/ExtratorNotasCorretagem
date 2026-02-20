@@ -242,7 +242,12 @@ class TickerSanitizer:
             
             for issue_type, entries in sorted(self.issues.items()):
                 for desc, ticker in entries:
-                    suggestion = self.try_fix_mapping(desc, ticker) or "Revisão Manual"
+                    # Prioriza exceções conhecidas para a sugestão
+                    if desc.upper() in self.exceptions:
+                        suggestion = self.exceptions[desc.upper()]
+                    else:
+                        # Fallback: tenta web scraping
+                        suggestion = self.try_fix_mapping(desc, ticker) or "Revisão Manual"
                     writer.writerow([desc, ticker, issue_type, suggestion])
         
         print(f"✓ Relatório criado com {sum(len(e) for e in self.issues.values())} entrada(s)")

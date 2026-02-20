@@ -143,6 +143,8 @@ def _extract_operations_from_text(text, data_pregao, ticker_mapping):
     """Extrai operações de negociação diretamente do texto (fallback para tabelas faltantes).
     
     Padrão típico em notas de corretagem:
+    1-BOVESPA C FRACIONARIO NOME DO ATIVO ON NM 1 40,00 40,00 D
+    ou com prazo:
     1-BOVESPA C FRACIONARIO 01/00 NOME DO ATIVO ON NM 1 40,00 40,00 D
     
     Busca por: '1-BOVESPA' seguido de dados e retorna lista de operações encontradas.
@@ -152,19 +154,19 @@ def _extract_operations_from_text(text, data_pregao, ticker_mapping):
     if not text or '1-BOVESPA' not in text:
         return operacoes
     
-    # Padrão: 1-BOVESPA seguido de operação C/V, tipo, prazo, nome ativo, qtd, preço, preço, D/C
-    # CORRIGIDO: ([A-Z0-9\s]+?) para capturar nomes com números (ex: B2W, N1)
-    pattern = r'1-BOVESPA\s+([CV])\s+(\w+)\s+(\d{2}/\d{2})\s+([A-Z0-9\s]+?)\s+(\d+(?:[.,]\d+)?)\s+(\d+(?:[.,]\d+)?)\s+(\d+(?:[.,]\d+)?)\s+([DC])'
+    # Padrão: 1-BOVESPA seguido de operação C/V, tipo, NOME ATIVO (sem prazo obrigatório), qtd, preço, preço, D/C
+    # CORRIGIDO: Prazo DD/DD é OPCIONAL agora - algumas notas não têm prazo
+    # CORRIGIDO: ([A-Z0-9\s]+?) para capturar nomes com números (ex: ELETROBLAS, RAIADROGASIL ON NM)
+    pattern = r'1-BOVESPA\s+([CV])\s+(\w+)\s+(?:\d{2}/\d{2}\s+)?([A-Z0-9\s]+?)\s+(\d+)\s+([\d.,]+)\s+([\d.,]+)\s+([DC])'
     
     for match in re.finditer(pattern, text, re.IGNORECASE):
         try:
             operacao = match.group(1).upper()
-            ativo_nome = match.group(4).strip()
+            ativo_nome = match.group(3).strip()
             
-            # Os últimos 3 números são: quantidade, preço/ajuste, valor da operação
-            # Queremos quantidade e preço (primeiro dos 3 números)
-            qty_str = match.group(5)
-            price_str = match.group(6)
+            # Os números são: quantidade, preço/ajuste, valor da operação
+            qty_str = match.group(4)
+            price_str = match.group(5)
             
             # Extrai ticker do nome do ativo
             ticker = _extract_ticker_from_cells([ativo_nome], ticker_mapping)
@@ -332,6 +334,22 @@ def _fuzzy_match_asset_name(cell_text: str, mapping_name: str) -> bool:
     # OU se há pelo menos 2 palavras em comum (para evitar falsos positivos)
     return match_percentage >= 0.70 or len(common_words) >= 2
 
+def _fuzzy_match_score(cell_text: str, mapping_name: str) -> float:
+    """Calcula score de correspondência fuzzy (0.0 a 1.0).
+    
+    Retorna o percentual de palavras do mapeamento presentes na célula.
+    Usado para ordenar múltiplos matches por especificidade.
+    """
+    cell_words = _extract_words_from_asset_name(cell_text)
+    mapping_words = _extract_words_from_asset_name(mapping_name)
+    
+    if not mapping_words:
+        return 0.0
+    
+    common_words = cell_words.intersection(mapping_words)
+    # Prioriza matches com mais palavras em comum
+    return len(common_words) / len(mapping_words)
+
 
 def _string_similarity(a: str, b: str) -> float:
     """Retorna similaridade entre duas strings (0..1) usando SequenceMatcher."""
@@ -349,9 +367,9 @@ def _extract_ticker_from_cells(cells, ticker_mapping=None):
     Estratégia:
     1. Procura por padrão ticker B3 (4 letras + 2 dígitos)
     2. Busca em DE_PARA_TICKERS (hardcoded) com correspondência exata
-    3. Busca em DE_PARA_TICKERS (hardcoded) com correspondência fuzzy
+    3. Busca em DE_PARA_TICKERS (hardcoded) com correspondência fuzzy (ordenada por score)
     4. Busca em ticker_mapping com correspondência exata
-    5. Busca em ticker_mapping com correspondência fuzzy
+    5. Busca em ticker_mapping com correspondência fuzzy (ordenada por score, prioriza descrições mais específicas)
     """
     for cell in cells:
         cell_str = str(cell).strip()
@@ -370,10 +388,17 @@ def _extract_ticker_from_cells(cells, ticker_mapping=None):
             if _normalize_text_for_comparison(nome) == cell_str_normalized:
                 return ticker
         
-        # Passo 3: Tenta correspondência fuzzy em DE_PARA (hardcoded)
+        # Passo 3: Tenta correspondência fuzzy em DE_PARA (ordenada por score)
+        best_match = None
+        best_score = 0.0
         for nome, ticker in DE_PARA_TICKERS.items():
             if _fuzzy_match_asset_name(cell_str, nome):
-                return ticker
+                score = _fuzzy_match_score(cell_str, nome)
+                if score > best_score:
+                    best_score = score
+                    best_match = ticker
+        if best_match:
+            return best_match
         
         # Passo 4: Tenta correspondência exata em ticker_mapping
         if ticker_mapping:
@@ -381,11 +406,20 @@ def _extract_ticker_from_cells(cells, ticker_mapping=None):
                 if _normalize_text_for_comparison(nome) == cell_str_normalized:
                     return ticker
         
-        # Passo 5: Tenta correspondência fuzzy em ticker_mapping
+        # Passo 5: Tenta correspondência fuzzy em ticker_mapping (ordenada por score - mais específica primeiro)
         if ticker_mapping:
+            best_match = None
+            best_score = 0.0
             for nome, ticker in ticker_mapping.items():
                 if _fuzzy_match_asset_name(cell_str, nome):
-                    return ticker
+                    score = _fuzzy_match_score(cell_str, nome)
+                    # Prioriza matches com score mais alto (mais em comum)
+                    # Em caso de empate, a ordem do dicionário decide
+                    if score > best_score:
+                        best_score = score
+                        best_match = ticker
+            if best_match:
+                return best_match
     
         # Passo 6: Última tentativa - correspondência por similaridade de string
         # (cobre erros de digitação como 'BRASKEN' vs 'BRASKEM')

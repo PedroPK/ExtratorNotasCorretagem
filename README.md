@@ -704,6 +704,68 @@ python3 src/extratorNotasCorretagem.py --year 2018
 
 Se quiser que eu integre o modo `--from-pdf` diretamente (o script extrairia automaticamente as descrições dos PDFs e geraria o mapeamento), diga e eu implemento essa integração.
 
+## 🔧 Correções Recentes
+
+### v1.1.2 (20/02/2026) - Mapeamento de Tickers com Score-Based Fuzzy Matching
+
+**Problema:** Operações de ativos como "ELETROBRAS PNB N1" estavam sendo mapeadas incorretamente para ELET3 quando deveriam ser ELET4, porque o sistema retornava o primeiro match fuzzy encontrado sem considerar a especificidade.
+
+**Exemplo do problema:** 
+- 17/10/2018: 3 operações de ELETROBRAS PNB N1 @ 25,00, 25,15 e 25,10
+- Todas mapeadas incorretamente para ELET3 (ON)
+- Deveriam estar mapeadas para ELET4 (PNB)
+
+**Solução:**
+1. **Expandida tabela `tickerMapping.properties`:** Adicionados 12 variantes específicas de ELETROBRAS com sufixos N1 (ex: `ELETROBRAS PNB N1=ELET4`)
+2. **Implementado `_fuzzy_match_score()`:** Função que calcula qualidade de match (0.0-1.0)
+   - "ELETROBRAS PNB N1" vs "ELETROBRAS PNB N1" = 1.0 (perfeito)
+   - "ELETROBRAS PNB N1" vs "ELETROBRAS PNB" = 0.67 (parcial)
+   - "ELETROBRAS PNB N1" vs "ELETROBRAS ON" = 0.33 (mínimo)
+3. **Refatorada `_extract_ticker_from_cells()`:** Agora usa score-based best matching
+   - Passo 3 e 5 rastreiam `best_score` e `best_match`
+   - Retorna o match com maior score, não o primeiro encontrado
+   - Elimina dependência de ordem de iteração do dicionário
+
+**Impacto:**
+- ELETROBRAS PNB N1 agora mapeia corretamente para ELET4 (3 registros em 17/10/2018)
+- ELETROBRAS ON N1 continua correto em ELET3 (1 registro em 17/10/2018)
+- Melhoria aplicável a todos os ativos com múltiplas variantes (PN, PND, PNB, ON, etc.)
+
+### v1.1.1 (20/02/2026) - Regex de Extração de Operações
+
+**Problema:** Operações de negociação extraídas via fallback de texto (quando pdfplumber não captura como tabela) estavam sendo perdidas porque o regex exigia prazo em formato `DD/DD` que nem sempre está presente nas notas.
+
+**Exemplo do problema:** 
+- PDF continha 6 operações para 17/10/2018
+- Script extraía apenas 3 (as em formato de tabela)
+- As 3 operações faltando (ELETROBRAS ON N1 e RAIADROGASIL ON NM) estavam no texto mas não eram capturadas
+
+**Solução:**
+- Modificado regex em `_extract_operations_from_text()` para tornar prazo DD/DD **opcional**
+- Padrão antigo: `1-BOVESPA\s+([CV])\s+(\w+)\s+(\d{2}/\d{2})\s+...` (prazo obrigatório)
+- Padrão novo: `1-BOVESPA\s+([CV])\s+(\w+)\s+(?:\d{2}/\d{2}\s+)?...` (prazo opcional)
+- Resultado: Todas as 6 operações agora são extraídas corretamente
+
+**Impacto:**
+- Total de registros extraídos aumentou de 107 para 168 em PDF de 2018
+- Extração mais completa e robusta
+
+### v1.1.0 (19/02/2026) - Sanitização de Tickers
+
+- Adicionado script `sanitize_tickers.py` com validação contra nomenclatura B3
+- Implementado sistema de mapeamento com exceções
+- Adicionado suporte web scraping como fallback
+- Corrigidas 4 entradas problemáticas em `tickerMapping.properties`
+
+## 📊 Histórico de Versões
+
+| Versão | Data | Mudança Principal |
+|--------|------|---|
+| 1.1.2 | 20/02/2026 | Score-based fuzzy matching para tickers |
+| 1.1.1 | 20/02/2026 | Fix regex operações de texto |
+| 1.1.0 | 19/02/2026 | Sanitização de tickers |
+| 1.0.0 | 16/02/2026 | Release inicial |
+
 ## 🤝 Contribuindo
 
 1. Faça um fork do projeto
@@ -732,5 +794,5 @@ Para dúvidas ou problemas, abra uma issue no GitHub ou envie um email.
 
 ---
 
-**Última atualização:** 19/02/2026  
-**Versão:** 1.1.0
+**Última atualização:** 20/02/2026  
+**Versão:** 1.1.2
