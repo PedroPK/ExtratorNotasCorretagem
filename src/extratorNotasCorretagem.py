@@ -154,10 +154,11 @@ def _extract_operations_from_text(text, data_pregao, ticker_mapping):
     if not text or '1-BOVESPA' not in text:
         return operacoes
     
-    # Padrão: 1-BOVESPA seguido de operação C/V, tipo, NOME ATIVO (sem prazo obrigatório), qtd, preço, preço, D/C
+    # Padrão: 1-BOVESPA seguido de operação C/V, tipo, NOME ATIVO (asset pode ter extra como DM 0,10), [opcional #], qtd, preço, preço, D/C
     # CORRIGIDO: Prazo DD/DD é OPCIONAL agora - algumas notas não têm prazo
     # CORRIGIDO: ([A-Z0-9\s]+?) para capturar nomes com números (ex: ELETROBLAS, RAIADROGASIL ON NM)
-    pattern = r'1-BOVESPA\s+([CV])\s+(\w+)\s+(?:\d{2}/\d{2}\s+)?([A-Z0-9\s]+?)\s+(\d+)\s+([\d.,]+)\s+([\d.,]+)\s+([DC])'
+    # CORRIGIDO: (.+?) para capturar asset name com extra info (ex: FORJA TAURUS DM 0,10), com #? para lidar com # nos dados
+    pattern = r'1-BOVESPA\s+([CV])\s+(\w+)\s+(.+?)\s+#?\s*(\d+)\s+([\d.,]+)\s+([\d.,]+)\s+([DC])'
     
     for match in re.finditer(pattern, text, re.IGNORECASE):
         try:

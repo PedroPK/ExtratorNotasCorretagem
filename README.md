@@ -706,6 +706,33 @@ Se quiser que eu integre o modo `--from-pdf` diretamente (o script extrairia aut
 
 ## 🔧 Correções Recentes
 
+### v1.1.3 (20/02/2026) - Regex de Extração Melhorado para Caracteres Especiais
+
+**Problema:** Operações que continham o caractere "#" no PDF não estavam sendo extraídas, resultando em perda de dados. Exemplo: 29/10/2018 tinha 15 operações no PDF mas apenas 11 eram extraídas.
+
+**Exemplo do problema:** 
+- PDF: `1-BOVESPA C FRACIONARIO CEMIG PN N1 # 1 11,30 11,30 D` (com #)
+- Antes: Não era capturada ❌
+- Depois: Capturada corretamente ✓
+
+**Operações que foram recuperadas (4):**
+1. CEMIG PN N1 @ 11,30 (tinha # no PDF)
+2. FORJA TAURUS DM @ 2,25 (segunda operação com #)
+3. FORJA TAURUS DM @ 2,20 (tinha #)
+4. FORJA TAURUS PN N2 @ 7,75 (operação V/venda com #)
+
+**Solução:**
+- Melhorado regex em `_extract_operations_from_text()` para: 
+  - Aceitar caracteres especiais no nome do ativo (mudança de `[A-Z0-9\s]+?` para `.+?`)
+  - Ignorar o caractere "#" que aparece intermitentemente (`#?\s*`)
+- Padrão antigo: `1-BOVESPA\s+([CV])\s+(\w+)\s+(?:\d{2}/\d{2}\s+)?([A-Z0-9\s]+?)\s+(\d+)...`
+- Padrão novo: `1-BOVESPA\s+([CV])\s+(\w+)\s+(.+?)\s+#?\s*(\d+)...`
+
+**Impacto:**
+- 29/10/2018: 11 → 15 operações extraídas (+36%)
+- Extração mais robusta de operações com caracteres especiais
+- Suporta variações no formato dos dados dos PDFs
+
 ### v1.1.2 (20/02/2026) - Mapeamento de Tickers com Score-Based Fuzzy Matching
 
 **Problema:** Operações de ativos como "ELETROBRAS PNB N1" estavam sendo mapeadas incorretamente para ELET3 quando deveriam ser ELET4, porque o sistema retornava o primeiro match fuzzy encontrado sem considerar a especificidade.
@@ -761,6 +788,7 @@ Se quiser que eu integre o modo `--from-pdf` diretamente (o script extrairia aut
 
 | Versão | Data | Mudança Principal |
 |--------|------|---|
+| 1.1.3 | 20/02/2026 | Fix regex para caracteres especiais (#) |
 | 1.1.2 | 20/02/2026 | Score-based fuzzy matching para tickers |
 | 1.1.1 | 20/02/2026 | Fix regex operações de texto |
 | 1.1.0 | 19/02/2026 | Sanitização de tickers |
@@ -795,4 +823,4 @@ Para dúvidas ou problemas, abra uma issue no GitHub ou envie um email.
 ---
 
 **Última atualização:** 20/02/2026  
-**Versão:** 1.1.2
+**Versão:** 1.1.3
