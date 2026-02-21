@@ -4,9 +4,9 @@ Um script Python para extrair dados de notas de negociação de PDFs da Bolsa de
 
 ## 🚀 Quick Start para Novos Usuários
 
-**Novo por aqui?** Leia o **[QUICKSTART.md](QUICKSTART.md)** para instruções passo a passo de instalação e execução!
+**Novo por aqui?** Leia o **[QUICKSTART.md](docs/QUICKSTART.md)** para instruções passo a passo de instalação e execução!
 
-[![Quick Start](https://img.shields.io/badge/NEW%20USER-START%20HERE-blue?style=for-the-badge)](QUICKSTART.md)
+[![Quick Start](https://img.shields.io/badge/NEW%20USER-START%20HERE-blue?style=for-the-badge)](docs/QUICKSTART.md)
 
 ## ✨ Principais Características
 
@@ -63,7 +63,7 @@ pytest tests/test_ticket_mapping.py -v      # v1.1.6
 - ✅ Padrões de regex de extração
 - ✅ Formatação de logs
 
-[Ver documentação completa de testes →](TESTING.md)
+[Ver documentação completa de testes →](docs/TESTING.md)
 
 ### 🔍 Análise Estática (SAST)
 
@@ -86,7 +86,7 @@ mypy src/                   # Type checking (opcional)
 - **Bandit**: ✅ 0 vulnerabilidades (segurança)
 - **mypy**: ⚠️ Partial (type hints opcionais)
 
-[Relatório completo →](SAST_RESULTS.md) | [Referência rápida →](SAST_QUICK_REFERENCE.md)
+[Relatório completo →](docs/SAST_RESULTS.md) | [Referência rápida →](docs/SAST_QUICK_REFERENCE.md)
 
 ### 📊 Metricas de Qualidade
 
@@ -105,7 +105,7 @@ Test Coverage:           ✅ 82 tests passing
 
 ## 🚀 Instalação Extra Rápida
 
-Para instruções completas, veja **[QUICKSTART.md](QUICKSTART.md)**
+Para instruções completas, veja **[docs/QUICKSTART.md](docs/QUICKSTART.md)**
 
 ```bash
 # 1. Clone
@@ -164,10 +164,13 @@ ExtratorNotasCorretagem/
 │       └── logs/
 │           └── extracao_*.log           # 📋 Logs detalhados
 ├── docs/                                # 📚 Documentação
+│   ├── QUICKSTART.md                    # 🚀 Guia rápido (comece aqui!)
+│   ├── TESTING.md                       # 🧪 Documentação de testes
+│   ├── SAST_RESULTS.md                  # 📊 Relatório SAST
+│   ├── SAST_QUICK_REFERENCE.md          # 🔧 Referência de comandos
 │   ├── YEAR_FILTER.md
 │   ├── IMPLEMENTATION_SUMMARY.md
 │   └── ANALISE_ESTRUTURA_PDFS.md
-├── QUICKSTART.md                        # 🚀 Guia rápido (comece aqui!)
 ├── README.md                            # Este arquivo
 ├── .gitignore
 └── .git
@@ -819,9 +822,9 @@ ruff check src/ --fix && black src/
 ```
 
 **Documentação Nova:**
-- [SAST_RESULTS.md](SAST_RESULTS.md) - Relatório completo de análise
-- [SAST_QUICK_REFERENCE.md](SAST_QUICK_REFERENCE.md) - Guia de comandos rápidos
-- [TESTING.md](TESTING.md) - Documentação de testes
+- [docs/SAST_RESULTS.md](docs/SAST_RESULTS.md) - Relatório completo de análise
+- [docs/SAST_QUICK_REFERENCE.md](docs/SAST_QUICK_REFERENCE.md) - Guia de comandos rápidos
+- [docs/TESTING.md](docs/TESTING.md) - Documentação de testes
 - [tests/README.md](tests/README.md) - Suite de testes
 
 **Impacto:**
