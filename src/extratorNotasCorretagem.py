@@ -11,7 +11,6 @@ import argparse
 from io import BytesIO
 from datetime import datetime
 from typing import Dict, List, Optional
-from tqdm import tqdm
 from config import get_config
 
 # Carregar configurações
@@ -777,43 +776,37 @@ def analisar_pasta_ou_zip(caminho, year_filter: Optional[int] = None):
             logger.error(f"✗ Caminho não é arquivo ZIP ou pasta: {caminho}")
             return pd.DataFrame()
 
-        # Barra de progresso global para todos os PDFs
-        # Usando position=-1 para deixar a barra no final, sem sobrepor os logs
-        with tqdm(total=len(tarefas), desc="📥 Processando PDFs", unit="arquivo", file=sys.stderr, position=-1, dynamic_ncols=True) as pbar:
-            try:
-                for tarefa in tarefas:
-                    if stop_processing:
-                        logger.warning("⏸️ Interrupção detectada — finalizando processamento após o arquivo atual.")
-                        break
+        # Processando PDFs sem barra de progresso (logs indicam progresso suficientemente)
+        try:
+            for tarefa in tarefas:
+                if stop_processing:
+                    logger.warning("⏸️ Interrupção detectada — finalizando processamento após o arquivo atual.")
+                    break
 
-                    if tarefa['type'] == 'file':
-                        try:
-                            dados = processar_pdf(tarefa['path'])
-                            todos_dados.extend(dados)
-                            arquivos_processados += 1
-                        except Exception as e:
-                            logger.error(f"✗ Erro ao processar {tarefa['path']}: {str(e)}")
-                            arquivos_erro += 1
-                        finally:
-                            pbar.update(1)
+                if tarefa['type'] == 'file':
+                    try:
+                        dados = processar_pdf(tarefa['path'])
+                        todos_dados.extend(dados)
+                        arquivos_processados += 1
+                    except Exception as e:
+                        logger.error(f"✗ Erro ao processar {tarefa['path']}: {str(e)}")
+                        arquivos_erro += 1
 
-                    elif tarefa['type'] == 'zip_entry':
-                        try:
-                            with zipfile.ZipFile(tarefa['zip'], 'r') as z:
-                                with z.open(tarefa['name']) as f:
-                                    bio = criar_bytesio_com_nome(f.read(), os.path.basename(tarefa['name']))
-                                    dados = processar_pdf(bio)
-                                    todos_dados.extend(dados)
-                                    arquivos_processados += 1
-                        except Exception as e:
-                            logger.error(f"✗ Erro ao processar {tarefa['name']} do ZIP {os.path.basename(tarefa['zip'])}: {str(e)}")
-                            arquivos_erro += 1
-                        finally:
-                            pbar.update(1)
+                elif tarefa['type'] == 'zip_entry':
+                    try:
+                        with zipfile.ZipFile(tarefa['zip'], 'r') as z:
+                            with z.open(tarefa['name']) as f:
+                                bio = criar_bytesio_com_nome(f.read(), os.path.basename(tarefa['name']))
+                                dados = processar_pdf(bio)
+                                todos_dados.extend(dados)
+                                arquivos_processados += 1
+                    except Exception as e:
+                        logger.error(f"✗ Erro ao processar {tarefa['name']} do ZIP {os.path.basename(tarefa['zip'])}: {str(e)}")
+                        arquivos_erro += 1
 
-            except KeyboardInterrupt:
-                logger.warning("⚠️  Execução interrompida pelo usuário (KeyboardInterrupt). Salvando progresso parcial...")
-                # stop_processing já será True pelo handler; fora do laço iremos exportar o parcial
+        except KeyboardInterrupt:
+            logger.warning("⚠️  Execução interrompida pelo usuário (KeyboardInterrupt). Salvando progresso parcial...")
+            # stop_processing já será True pelo handler; fora do laço iremos exportar o parcial
 
         # Resumo final
         logger.info("\n" + "=" * 60)
