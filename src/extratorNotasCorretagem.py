@@ -508,6 +508,7 @@ def processar_pdf(pdf_file, senha=None):
     
     try:
         logger.info(f"📄 Processando arquivo: {arquivo_nome}")
+        sys.stderr.flush()
         
         # Tenta abrir com senha se fornecida
         try:
@@ -525,6 +526,7 @@ def processar_pdf(pdf_file, senha=None):
                     raise
             except:
                 logger.warning(f"⚠️  {arquivo_nome}: PDF protegido. Configure 'pdf.password' em application.properties")
+                sys.stderr.flush()
                 return dados_extraidos
         
         with pdf:
@@ -692,6 +694,7 @@ def processar_pdf(pdf_file, senha=None):
             logger.info(f"✓ {arquivo_nome}: {total_registros} registro(s) extraído(s) com sucesso")
         else:
             logger.warning(f"⚠️  {arquivo_nome}: Nenhum registro extraído")
+        sys.stderr.flush()
             
     except FileNotFoundError:
         logger.error(f"✗ Arquivo não encontrado: {arquivo_nome}")
@@ -775,7 +778,8 @@ def analisar_pasta_ou_zip(caminho, year_filter: Optional[int] = None):
             return pd.DataFrame()
 
         # Barra de progresso global para todos os PDFs
-        with tqdm(total=len(tarefas), desc="📥 Processando PDFs", unit="arquivo") as pbar:
+        # Usando position=-1 para deixar a barra no final, sem sobrepor os logs
+        with tqdm(total=len(tarefas), desc="📥 Processando PDFs", unit="arquivo", file=sys.stderr, position=-1, dynamic_ncols=True) as pbar:
             try:
                 for tarefa in tarefas:
                     if stop_processing:
