@@ -706,6 +706,50 @@ Se quiser que eu integre o modo `--from-pdf` diretamente (o script extrairia aut
 
 ## 🔧 Correções Recentes
 
+### v1.1.6 (20/02/2026) - Prioridade Correta em Mapeamento de Tickers
+
+**Problema:** Operações com múltiplas variantes de classes de ações (ON, ON EJ N2, PN, PN EJ N2) estavam sendo mapeadas incorretamente porque o sistema escolhia mappings genéricos ao invés de específicos.
+
+**Exemplo do problema:**
+- 23/11/2018: PETROBRAS PN EJ N2 @ 24,20
+  - Extraído corretamente do PDF ✓
+  - Mas mapeado para PETR3 (ON) em vez de PETR4 (PN) ❌
+  - Mesmo com `tickerMapping.properties` contendo: `PETROBRAS PN EJ N2=PETR4`
+
+**Causa raiz:** A estratégia de busca de ticker em `_extract_ticker_from_cells()` verificava:
+1. Padrão B3 (XXXX##)
+2. **DE_PARA_TICKERS (hardcoded)** - continha `"PETROBRAS": "PETR3"` genérico
+3. Mapeamento configurável via arquivo
+
+Quando o asset era "PETROBRAS PN EJ N2":
+- Passo 2 encontrava "PETROBRAS" em DE_PARA_TICKERS com fuzzy match de score 1.0
+- Retornava PETR3 imediatamente
+- Nunca chegava no Passo 3 onde `PETROBRAS PN EJ N2=PETR4` estava mapeado
+
+**Solução:** Reordenar a estratégia de busca para dar prioridade ao arquivo configurável:
+1. Padrão B3 (XXXX##)
+2. **ticker_mapping configurável (exata)**
+3. **ticker_mapping configurável (fuzzy)** - prioridade máxima
+4. DE_PARA_TICKERS hardcoded (exata)
+5. DE_PARA_TICKERS hardcoded (fuzzy) - fallback
+
+Benefício: Mudanças em `tickerMapping.properties` agora têm precedência garantida sobre hardcoded `DE_PARA_TICKERS`.
+
+**Mappings corrigidos:**
+```properties
+# Novos mappings específicos adicionados
+PETROBRAS ON EJ N2=PETR3
+PETROBRAS PN EJ N2=PETR4
+GERDAU MET PN ED N1=GOAU4
+```
+
+**Impacto:**
+- 23/11/2018: PETROBRAS PN EJ N2agora mapeia para PETR4 ✓ (era PETR3)
+- PETROBRAS ON EJ N2 continua em PETR3 ✓
+- GERDAU MET PN ED N1 agora mapeia para GOAU4 ✓
+- Sistema de score-based matching (v1.1.2) continua funcionando
+- Melhor manutenibilidade: arquivo de configuração tem prioridade sobre código hardcoded
+
 ### v1.1.5 (20/02/2026) - Adição de Mapeamentos para KLABIN
 
 **Problema:** Operação de KLABIN S/A UNT EDJ N2 não estava sendo extraída.

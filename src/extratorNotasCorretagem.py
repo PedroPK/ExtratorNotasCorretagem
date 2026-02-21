@@ -338,8 +338,13 @@ def _fuzzy_match_asset_name(cell_text: str, mapping_name: str) -> bool:
 def _fuzzy_match_score(cell_text: str, mapping_name: str) -> float:
     """Calcula score de correspondência fuzzy (0.0 a 1.0).
     
-    Retorna o percentual de palavras do mapeamento presentes na célula.
-    Usado para ordenar múltiplos matches por especificidade.
+    Retorna o percentual de palavras do mapeamento presentes na célula,
+    com bônus para mapeamentos mais específicos (com mais palavras).
+    
+    Exemplos:
+    - "PETROBRAS PN EJ N2" vs "PETROBRAS PN EJ N2" → 1.0 (perfeito, 4 palavras)
+    - "PETROBRAS PN EJ N2" vs "PETROBRAS PN" → 0.8 (2/2 palavras do mapping, mas mapping é genérico)
+    - "PETROBRAS PN EJ N2" vs "PETROBRAS ON" → 0.5 (1 palavra em comum, mapping genérico)
     """
     cell_words = _extract_words_from_asset_name(cell_text)
     mapping_words = _extract_words_from_asset_name(mapping_name)
@@ -348,8 +353,17 @@ def _fuzzy_match_score(cell_text: str, mapping_name: str) -> float:
         return 0.0
     
     common_words = cell_words.intersection(mapping_words)
-    # Prioriza matches com mais palavras em comum
-    return len(common_words) / len(mapping_words)
+    
+    # Score base: percentual de palavras do mapping presentes no cell
+    base_score = len(common_words) / len(mapping_words)
+    
+    # Bônus de especificidade: mapeamentos com mais palavras recebem bônus
+    # Isso garante que "PETROBRAS PN EJ N2" (4 palavras) bata "PETROBRAS PN" (2 palavras)
+    # quando ambos têm base_score = 1.0
+    specificity_bonus = len(mapping_words) / (len(cell_words) + len(mapping_words))
+    
+    # Combina: 90% do base_score + 10% do bônus de especificidade
+    return 0.9 * base_score + 0.1 * specificity_bonus
 
 
 def _string_similarity(a: str, b: str) -> float:
@@ -365,12 +379,12 @@ def _extract_ticker_from_cells(cells, ticker_mapping=None):
     """
     Extrai ticker da linha, buscando padrão B3 ou nome de ativo conhecido.
     
-    Estratégia:
+    Estratégia (prioriza arquivo configurável sobre hardcoded):
     1. Procura por padrão ticker B3 (4 letras + 2 dígitos)
-    2. Busca em DE_PARA_TICKERS (hardcoded) com correspondência exata
-    3. Busca em DE_PARA_TICKERS (hardcoded) com correspondência fuzzy (ordenada por score)
-    4. Busca em ticker_mapping com correspondência exata
-    5. Busca em ticker_mapping com correspondência fuzzy (ordenada por score, prioriza descrições mais específicas)
+    2. Busca em ticker_mapping com correspondência exata
+    3. Busca em ticker_mapping com correspondência fuzzy (ordenada por score, prioriza descrições mais específicas)
+    4. Busca em DE_PARA_TICKERS (hardcoded) com correspondência exata
+    5. Busca em DE_PARA_TICKERS (hardcoded) com correspondência fuzzy (ordenada por score)
     """
     for cell in cells:
         cell_str = str(cell).strip()
@@ -384,30 +398,13 @@ def _extract_ticker_from_cells(cells, ticker_mapping=None):
         
         cell_str_normalized = _normalize_text_for_comparison(cell_str)
         
-        # Passo 2: Tenta correspondência exata em DE_PARA (hardcoded)
-        for nome, ticker in DE_PARA_TICKERS.items():
-            if _normalize_text_for_comparison(nome) == cell_str_normalized:
-                return ticker
-        
-        # Passo 3: Tenta correspondência fuzzy em DE_PARA (ordenada por score)
-        best_match = None
-        best_score = 0.0
-        for nome, ticker in DE_PARA_TICKERS.items():
-            if _fuzzy_match_asset_name(cell_str, nome):
-                score = _fuzzy_match_score(cell_str, nome)
-                if score > best_score:
-                    best_score = score
-                    best_match = ticker
-        if best_match:
-            return best_match
-        
-        # Passo 4: Tenta correspondência exata em ticker_mapping
+        # Passo 2: Tenta correspondência exata em ticker_mapping (configurável - PRIORIDADE)
         if ticker_mapping:
             for nome, ticker in ticker_mapping.items():
                 if _normalize_text_for_comparison(nome) == cell_str_normalized:
                     return ticker
         
-        # Passo 5: Tenta correspondência fuzzy em ticker_mapping (ordenada por score - mais específica primeiro)
+        # Passo 3: Tenta correspondência fuzzy em ticker_mapping (prioriza descrições mais específicas)
         if ticker_mapping:
             best_match = None
             best_score = 0.0
@@ -421,19 +418,35 @@ def _extract_ticker_from_cells(cells, ticker_mapping=None):
                         best_match = ticker
             if best_match:
                 return best_match
-    
+        
+        # Passo 4: Tenta correspondência exata em DE_PARA (hardcoded - fallback)
+        for nome, ticker in DE_PARA_TICKERS.items():
+            if _normalize_text_for_comparison(nome) == cell_str_normalized:
+                return ticker
+        
+        # Passo 5: Tenta correspondência fuzzy em DE_PARA (fallback ordenada por score)
+        best_match = None
+        best_score = 0.0
+        for nome, ticker in DE_PARA_TICKERS.items():
+            if _fuzzy_match_asset_name(cell_str, nome):
+                score = _fuzzy_match_score(cell_str, nome)
+                if score > best_score:
+                    best_score = score
+                    best_match = ticker
+        if best_match:
+            return best_match
+        
         # Passo 6: Última tentativa - correspondência por similaridade de string
         # (cobre erros de digitação como 'BRASKEN' vs 'BRASKEM')
         try:
+            for nome, ticker in ticker_mapping.items():
+                sim = _string_similarity(cell_str, nome)
+                if sim >= 0.85:
+                    return ticker
             for nome, ticker in DE_PARA_TICKERS.items():
                 sim = _string_similarity(cell_str, nome)
                 if sim >= 0.85:
                     return ticker
-            if ticker_mapping:
-                for nome, ticker in ticker_mapping.items():
-                    sim = _string_similarity(cell_str, nome)
-                    if sim >= 0.85:
-                        return ticker
         except Exception:
             pass
     # Se não encontrou padrão, retorna None (linha provavelmente não é válida)
