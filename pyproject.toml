@@ -1,0 +1,89 @@
+[tool.ruff]
+# Configuração do Ruff - Linter ultra-rápido para Python
+# https://docs.astral.sh/ruff/
+
+# Linha máxima de caracteres
+line-length = 100
+
+# Versão mínima de Python
+target-version = "py38"
+
+# Enabled rules (mais focado)
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # Pyflakes (undefined names, etc)
+    "I",      # isort (import sorting)
+    "N",      # pep8-naming
+    "UP",     # pyupgrade
+    "B",      # flake8-bugbear
+]
+
+# Ignorar docstring rules por enquanto (D**)
+ignore = [
+    "D",      # pydocstyle - implementar depois
+    "E501",   # Line too long (já controlado pelo Black)
+    "W503",   # Line break before binary operator
+]
+
+# Exclude directories
+exclude = [
+    ".git",
+    "__pycache__",
+    ".venv",
+    "dist",
+    "build",
+    ".eggs",
+    "*.egg-info",
+    "validations",
+    "scripts",
+]
+
+[tool.black]
+# Configuração do Black - Formatador automático
+line-length = 100
+target-version = ["py38"]
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # diretórios
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+)/
+'''
+
+[tool.mypy]
+# Configuração do mypy - Type checker para Python
+# https://mypy.readthedocs.io/en/stable/config_file.html
+
+# Modo strict
+strict = true
+
+# Permite tipos Any implícitos em algumas situações
+allow_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unused_configs = true
+warn_incomplete_stub = true
+
+# Diretórios a análisar
+files = ["src"]
+
+# Ignorar erros em bibliotecas sem tipos
+ignore_missing_imports = true
+
+# Plugins
+plugins = []
+
+[tool.pytest.ini_options]
+# Configuração do pytest (para referência)
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_functions = "test_*"
+python_classes = "Test*"
