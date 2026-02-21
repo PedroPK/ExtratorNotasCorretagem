@@ -848,13 +848,13 @@ def ordenar_dados_por_data(df):
         # Converte coluna Data para datetime (formato DD/MM/YYYY)
         df['Data'] = pd.to_datetime(df['Data'], format='%d/%m/%Y')
         
-        # Ordena por Data (do mais antigo para o mais recente)
-        df = df.sort_values('Data', ascending=True)
+        # Ordena por Data (do mais antigo para o mais recente) e depois por Ticker (alfabético)
+        df = df.sort_values(['Data', 'Ticker'], ascending=True)
         
         # Converte Data de volta para string no formato original DD/MM/YYYY
         df['Data'] = df['Data'].dt.strftime('%d/%m/%Y')
         
-        logger.info("✓ Dados ordenados por data (mais antigo para o mais recente)")
+        logger.info("✓ Dados ordenados por data (mais antigo para o mais recente) e depois por ticker")
         return df.reset_index(drop=True)
     
     except Exception as e:

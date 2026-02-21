@@ -15,3 +15,5 @@
 15. Gerar estatisticas de negociação, como ativos mais negociados, quantidade de ativos negociados desde o começo, volume de compras e vendas somado, gráficos de distribuição, histogramas, meses com maior volume de negociações. etc.
 16. Ainda há Tickers com final F, por causa de compras fracionárias. Remover o F.
 17. Remover Tickers de Opções.
+18. Implementar o Modo Escuro no arquivo de saída
+19. Mover todos os Scripts temporários de validação para a pasta validations
