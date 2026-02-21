@@ -706,6 +706,27 @@ Se quiser que eu integre o modo `--from-pdf` diretamente (o script extrairia aut
 
 ## 🔧 Correções Recentes
 
+### v1.1.7 (20/02/2026) - Formatação de Separador Decimal (Padrão Brasileiro)
+
+**Melhoria:** Coluna "Preço" agora exibe valores com vírgula como separador decimal, seguindo o padrão brasileiro.
+
+**Formato anterior:** `24.20`, `33.40`, `7.10` (ponto como separador)
+
+**Formato atual:** `24,20`, `33,40`, `7,10` (vírgula como separador) ✓
+
+**Cobertura:**
+- ✅ Aba "Dados" (lista completa de operações)
+- ✅ Aba "Árvore" (estrutura hierárquica)
+- ✅ Todos os formatos de export (XLSX, CSV, JSON)
+
+**Implementação:** 
+- Formatação aplicada durante exportação para XLSX
+- Usa pandas `str.replace()` para converter ponto em vírgula
+- Não afeta os dados originais extraídos dos PDFs
+- Garante compatibilidade com sistemas brasileiros
+
+**Impacto:** Melhor legibilidade e conformidade com padrão de formatação brasileiro ISO 8859-1.
+
 ### v1.1.6 (20/02/2026) - Prioridade Correta em Mapeamento de Tickers
 
 **Problema:** Operações com múltiplas variantes de classes de ações (ON, ON EJ N2, PN, PN EJ N2) estavam sendo mapeadas incorretamente porque o sistema escolhia mappings genéricos ao invés de específicos.
@@ -884,6 +905,8 @@ Outros exemplos corrigidos anteriormente: ELETROBRAS (ON→ELET3 vs PNB→ELET4)
 
 | Versão | Data | Mudança Principal |
 |--------|------|---|
+| 1.1.7 | 20/02/2026 | Formatação decimal com vírgula (padrão brasileiro) |
+| 1.1.6 | 20/02/2026 | Prioridade correta em mapeamento de tickers |
 | 1.1.5 | 20/02/2026 | Adição de mappings para KLABIN UNT |
 | 1.1.4 | 20/02/2026 | Mappings PN N1 para BRADESPAR e GERDAU |
 | 1.1.3 | 20/02/2026 | Fix regex para caracteres especiais (#) |

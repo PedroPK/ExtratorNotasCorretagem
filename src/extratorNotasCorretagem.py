@@ -957,11 +957,17 @@ def exportar_dados(df, formato=None):
             # Cria writer para múltiplas abas
             with pd.ExcelWriter(arquivo_saida, engine='openpyxl') as writer:
                 # Aba 1: Dados completos e ordenados
-                df.to_excel(writer, sheet_name="Dados", index=False)
-                logger.info(f"✓ Aba 'Dados' criada: {len(df)} linhas, {len(df.columns)} colunas")
+                # Formata coluna Preço com separador decimal em vírgula (padrão brasileiro)
+                df_export = df.copy()
+                if 'Preço' in df_export.columns:
+                    df_export['Preço'] = df_export['Preço'].astype(str).str.replace('.', ',', regex=False)
+                df_export.to_excel(writer, sheet_name="Dados", index=False)
+                logger.info(f"✓ Aba 'Dados' criada: {len(df_export)} linhas, {len(df_export.columns)} colunas")
                 
                 # Aba 2: Estrutura de árvore (Ano/Mês/Dia hierárquicos)
                 df_arvore = criar_aba_arvore(df)
+                if 'Preço' in df_arvore.columns:
+                    df_arvore['Preço'] = df_arvore['Preço'].astype(str).str.replace('.', ',', regex=False)
                 df_arvore.to_excel(writer, sheet_name="Árvore", index=False)
                 logger.info(f"✓ Aba 'Árvore' criada: {len(df_arvore)} linhas (estrutura hierárquica)")
             
