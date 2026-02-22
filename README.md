@@ -2,6 +2,17 @@
 
 Um script Python para extrair dados de notas de negociação de PDFs da Bolsa de Valores Brasileira (B3).
 
+## Motivação
+
+Para quem opera na bolsa de valores do Brasil (B3), um das aditividades que precisam ser feitas é controlar as operações feitas, para por exemplo calcular os Preços Médios, calcular Lucros e Prejuizos, declaração de Imposto de Renda, analisar a rentabilidade, etc.
+
+Esse controle pode ser feito via aplicativos que acessam diretamente API`s da B3, mas na minha experiëncia individual, alguns registros fantasmas aparecem nesses aplicativos (não sei se por falha deles ou da própria B3). Ativos que já me desfiz ainda aparecem como se eu os tivesse em custódia, as quantidades de cotas são contabilizadas erradas, os preços médios também, isso mesmo em versões pagas.
+
+Devido a essas frustrações, mantive um controle pessoal usando planilhas. Mas o trabalho de mante-las atualizadas é relativamente grande. E por isso criei essa aplicação, que consiga extrair dados diretamente na fonte: as Notas de Corretagem emitidas pela minha corretora (no caso a Clear).
+
+Com esses dados extraidos, posso alimentar a planilha de controle original.
+
+
 ## 🚀 Quick Start para Novos Usuários
 
 **Novo por aqui?** Leia o **[QUICKSTART.md](docs/QUICKSTART.md)** para instruções passo a passo de instalação e execução!

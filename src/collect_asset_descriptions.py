@@ -83,7 +83,7 @@ def normalize_description(desc: str) -> str:
     s = re.sub(r"\s+\d+[\d\s,\.\-\/]*[A-Za-z]?$", "", s)
 
     # Remove leading/trailing punctuation and extra spaces
-    s = s.strip(" \t\n\r\x0b\f\-\.,;:()")
+    s = s.strip(r" \t\n\r\x0b\f\-\.,;:()")
     s = re.sub(r"\s+", " ", s)
 
     return s
