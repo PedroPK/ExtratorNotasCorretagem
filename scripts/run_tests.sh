@@ -1,8 +1,10 @@
 #!/bin/bash
 # Run all tests with coverage report
-# Usage: ./run_tests.sh
+# Usage: ./scripts/run_tests.sh or bash scripts/run_tests.sh
 
-cd "$(dirname "$0")" || exit 1
+# Vai para a raiz do projeto (um nível acima)
+PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$PROJECT_ROOT" || exit 1
 
 echo "🧪 ExtratorNotasCorretagem - Suite de Testes Automatizados"
 echo "═══════════════════════════════════════════════════════════"

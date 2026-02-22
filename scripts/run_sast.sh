@@ -6,7 +6,8 @@
 
 set -e
 
-PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
+# Detecta a raiz do projeto (um nível acima deste script)
+PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 REPORT_DIR="$PROJECT_ROOT/resouces/sast_reports"
 SRC_DIR="$PROJECT_ROOT/src"
 

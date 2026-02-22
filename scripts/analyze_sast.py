@@ -11,7 +11,9 @@ import sys
 from pathlib import Path
 from datetime import datetime
 
-PROJECT_ROOT = Path(__file__).parent
+# Detectar a raiz do projeto (dois níveis acima deste script)
+SCRIPT_DIR = Path(__file__).parent
+PROJECT_ROOT = SCRIPT_DIR.parent
 REPORT_DIR = PROJECT_ROOT / "resouces" / "sast_reports"
 # Analisar apenas o módulo principal
 SRC_DIR = PROJECT_ROOT / "src" / "extratorNotasCorretagem.py"
