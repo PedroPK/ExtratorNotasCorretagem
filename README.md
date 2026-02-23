@@ -798,7 +798,7 @@ Este projeto está licenciado sob a MIT License - veja o arquivo LICENSE para de
 
 ## 👤 Autor
 
-Pedro Pessoa Kron ([@pedropk](https://github.com/pedropk))
+Pedro ([@pedropk](https://github.com/pedropk))
 
 ## 🙏 Agradecimentos
 
