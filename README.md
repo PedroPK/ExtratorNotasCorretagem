@@ -813,4 +813,4 @@ Para dúvidas ou problemas, abra uma issue no GitHub ou envie um email.
 ---
 
 **Última atualização:** 20/02/2026  
-**Versão:** 1.1.5
+**Versão:** 1.2.0
