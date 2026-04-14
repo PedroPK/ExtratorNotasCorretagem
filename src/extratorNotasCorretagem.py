@@ -567,6 +567,29 @@ def _should_process_file(filename: str, target_year: Optional[int]) -> bool:
     return file_year == target_year
 
 
+def _normalize_ticker_value(ticker_value: str) -> str:
+    """Normaliza ticker para comparação case-insensitive e sem espaços."""
+    return re.sub(r"\s+", "", str(ticker_value).upper().strip())
+
+
+def _filter_dataframe_by_ticker(df: pd.DataFrame, target_ticker: Optional[str]) -> pd.DataFrame:
+    """Filtra DataFrame para um único ticker quando solicitado."""
+    if df.empty or not target_ticker:
+        return df
+
+    if "Ticker" not in df.columns:
+        logger.warning("⚠️  Coluna 'Ticker' não encontrada. Filtro de ticker não aplicado.")
+        return df
+
+    target = _normalize_ticker_value(target_ticker)
+    filtered = df[df["Ticker"].astype(str).apply(_normalize_ticker_value) == target].copy()
+
+    logger.info(
+        f"🔎 Filtro de ticker aplicado: {target} | Registros antes: {len(df)} | depois: {len(filtered)}"
+    )
+    return filtered
+
+
 def processar_pdf(pdf_file, senha=None):
     dados_extraidos = []
 
@@ -1043,12 +1066,13 @@ def criar_aba_arvore(df):
         return df.copy()
 
 
-def exportar_dados(df, formato=None):
+def exportar_dados(df, formato=None, ticker=None):
     """Exporta os dados extraídos para o formato especificado.
 
     Args:
         df (pd.DataFrame): DataFrame com os dados extraídos
         formato (str): Formato de saída (csv, xlsx, json). Se None, usa config.
+        ticker (str): Ticker filtrado, quando aplicável. Incluído no nome do arquivo.
 
     Returns:
         bool: True se exportado com sucesso, False caso contrário
@@ -1072,16 +1096,17 @@ def exportar_dados(df, formato=None):
 
         # Gera nome do arquivo com timestamp
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        ticker_suffix = f"_{_normalize_ticker_value(ticker)}" if ticker else ""
 
         # Exporta no formato escolhido
         if formato == "csv":
-            arquivo_saida = os.path.join(pasta_output, f"dados_extraidos_{timestamp}.csv")
+            arquivo_saida = os.path.join(pasta_output, f"dados_extraidos{ticker_suffix}_{timestamp}.csv")
             df.to_csv(arquivo_saida, index=False, encoding="utf-8-sig")
             logger.info(f"✓ Dados exportados para CSV: {arquivo_saida}")
             logger.info(f"   Linhas: {len(df)} | Colunas: {len(df.columns)}")
 
         elif formato == "xlsx":
-            arquivo_saida = os.path.join(pasta_output, f"dados_extraidos_{timestamp}.xlsx")
+            arquivo_saida = os.path.join(pasta_output, f"dados_extraidos{ticker_suffix}_{timestamp}.xlsx")
             # Cria writer para múltiplas abas
             with pd.ExcelWriter(arquivo_saida, engine="openpyxl") as writer:
                 # Aba 1: Dados completos e ordenados
@@ -1110,7 +1135,7 @@ def exportar_dados(df, formato=None):
             logger.info(f"✓ Arquivo XLSX exportado com 2 abas: {arquivo_saida}")
 
         elif formato == "json":
-            arquivo_saida = os.path.join(pasta_output, f"dados_extraidos_{timestamp}.json")
+            arquivo_saida = os.path.join(pasta_output, f"dados_extraidos{ticker_suffix}_{timestamp}.json")
             df.to_json(arquivo_saida, orient="records", indent=2, force_ascii=False)
             logger.info(f"✓ Dados exportados para JSON: {arquivo_saida}")
             logger.info(f"   Linhas: {len(df)} | Colunas: {len(df.columns)}")
@@ -1143,6 +1168,8 @@ Exemplos de uso:
   python3 extratorNotasCorretagem.py                    # Processa todos os PDFs
   python3 extratorNotasCorretagem.py --year 2024        # Processa apenas PDFs de 2024
   python3 extratorNotasCorretagem.py -y 2026            # Processa apenas PDFs de 2026
+    python3 extratorNotasCorretagem.py --ticker PSSA3     # Processa operações de um ticker
+    python3 extratorNotasCorretagem.py -y 2024 -t VALE3   # Combina filtro de ano e ticker
         """,
     )
     parser.add_argument(
@@ -1152,9 +1179,17 @@ Exemplos de uso:
         default=None,
         help="Filtrar por ano (extrair apenas PDFs com esse ano no nome do arquivo)",
     )
+    parser.add_argument(
+        "--ticker",
+        "-t",
+        type=str,
+        default=None,
+        help="Filtrar por ticker (ex: PSSA3)",
+    )
 
     args = parser.parse_args()
     year_filter = args.year
+    ticker_filter = args.ticker
 
     # Caminho da pasta com os arquivos de entrada
     caminho_pasta = config.get_input_folder()
@@ -1164,6 +1199,8 @@ Exemplos de uso:
 
     logger.info(f"📂 Diretório de entrada: {caminho_pasta}")
     logger.info(f"🔍 Caminho absoluto: {caminho_absoluto}\n")
+    if ticker_filter:
+        logger.info(f"🔎 Filtro de ticker ativo: {_normalize_ticker_value(ticker_filter)}")
 
     # Se a pasta não existe, tenta informar melhor
     if not os.path.exists(caminho_absoluto):
@@ -1175,6 +1212,7 @@ Exemplos de uso:
     else:
         logger.info("✓ Pasta encontrada. Processando...\n")
         df = analisar_pasta_ou_zip(caminho_absoluto, year_filter=year_filter)
+        df = _filter_dataframe_by_ticker(df, ticker_filter)
 
         if not df.empty:
             logger.info(f"\n📋 Primeiras linhas dos dados extraídos:")
@@ -1185,7 +1223,7 @@ Exemplos de uso:
             logger.info("💾 EXPORTANDO DADOS")
             logger.info("=" * 60)
             formato = config.get_output_format()
-            sucesso = exportar_dados(df, formato)
+            sucesso = exportar_dados(df, formato, ticker=ticker_filter)
 
             if sucesso:
                 logger.info(f"\n✓ Processamento concluído com sucesso!")

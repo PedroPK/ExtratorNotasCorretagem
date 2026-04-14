@@ -26,6 +26,8 @@ from extratorNotasCorretagem import (
     limpar_ticker,
     _extract_year_from_filename,
     _should_process_file,
+    _normalize_ticker_value,
+    _filter_dataframe_by_ticker,
     _is_likely_header,
     _extract_operations_from_text,
     ordenar_dados_por_data,
@@ -164,6 +166,46 @@ class TestShouldProcessFile:
     def test_skip_file_without_year(self):
         """Testa que arquivo sem ano é ignorado quando há filtro."""
         assert _should_process_file("arquivo_sem_ano.pdf", 2024) is False
+
+
+class TestTickerFilter:
+    """Testes para normalização e filtro por ticker."""
+
+    def test_normalize_ticker_value(self):
+        """Testa normalização de ticker com espaços e caixa mista."""
+        assert _normalize_ticker_value("  pSsA3 ") == "PSSA3"
+
+    def test_filter_dataframe_by_ticker(self):
+        """Testa filtro retornando apenas ticker desejado."""
+        df = pd.DataFrame(
+            {
+                "Data": ["04/05/2024", "05/05/2024", "06/05/2024"],
+                "Ticker": ["PSSA3", "VALE3", "pssa3"],
+                "Operação": ["C", "V", "C"],
+                "Quantidade": ["10", "20", "30"],
+                "Preço": ["30.10", "61.00", "29.90"],
+            }
+        )
+
+        result = _filter_dataframe_by_ticker(df, " pssa3 ")
+
+        assert len(result) == 2
+        assert set(result["Ticker"].str.upper()) == {"PSSA3"}
+
+    def test_filter_dataframe_by_ticker_without_target(self):
+        """Testa que sem ticker alvo o DataFrame é mantido."""
+        df = pd.DataFrame(
+            {
+                "Data": ["04/05/2024"],
+                "Ticker": ["PSSA3"],
+                "Operação": ["C"],
+                "Quantidade": ["10"],
+                "Preço": ["30.10"],
+            }
+        )
+
+        result = _filter_dataframe_by_ticker(df, None)
+        assert len(result) == 1
 
 
 class TestIsLikelyHeader:

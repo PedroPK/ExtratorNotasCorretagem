@@ -4,6 +4,41 @@ Este arquivo concentra as notas de correções e histórico de versões do proje
 
 ## 🔧 Correções Recentes
 
+### v1.2.1 (14/04/2026) - Filtro por Ticker na Extração
+
+**Objetivo:** Permitir extração seletiva de operações para um único ticker via CLI.
+
+**Novidades:**
+- ✅ Novo argumento `--ticker` (atalho `-t`) no script principal
+- ✅ Filtro case-insensitive e tolerante a espaços (`pssa3`, ` PSSA3 `, etc.)
+- ✅ Compatível com filtro de ano (`--year` + `--ticker`)
+- ✅ Logging com resumo do filtro aplicado (antes/depois do filtro)
+- ✅ Testes unitários adicionados para normalização e filtro por ticker
+
+**Exemplos de uso:**
+```bash
+# Apenas operações de um ticker
+python3 src/extratorNotasCorretagem.py --ticker PSSA3
+
+# Forma curta
+python3 src/extratorNotasCorretagem.py -t VALE3
+
+# Combinado com ano
+python3 src/extratorNotasCorretagem.py --year 2024 --ticker PSSA3
+```
+
+**Arquivos impactados:**
+- `src/extratorNotasCorretagem.py`
+- `tests/test_extrator_main.py`
+- `README.md`
+- `docs/QUICKSTART.md`
+- `docs/YEAR_FILTER.md`
+
+**Impacto:**
+- Menor esforço para análises por ativo específico
+- Fluxo de auditoria mais rápido (extrair apenas o ticker desejado)
+- Sem quebra de compatibilidade com execuções antigas
+
 ### v1.2.0 (20/02/2026) - SAST & Controle de Qualidade Automatizado
 
 **Objetivo:** Implementar framework completo de Static Analysis Security Testing e automação de testes.

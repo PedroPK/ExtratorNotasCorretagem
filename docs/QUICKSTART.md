@@ -67,6 +67,20 @@ python3 src/extratorNotasCorretagem.py --year 2024
 python3 src/extratorNotasCorretagem.py -y 2024
 ```
 
+### Processar por ticker
+
+```bash
+python3 src/extratorNotasCorretagem.py --ticker PSSA3
+# ou
+python3 src/extratorNotasCorretagem.py -t PSSA3
+```
+
+### Processar por ano e ticker
+
+```bash
+python3 src/extratorNotasCorretagem.py --year 2024 --ticker PSSA3
+```
+
 ### Ver ajuda da CLI
 
 ```bash

@@ -25,6 +25,22 @@ python3 extratorNotasCorretagem.py --year 2024
 python3 extratorNotasCorretagem.py -y 2026
 ```
 
+### 3. Processar apenas operações de um ticker
+```bash
+python3 src/extratorNotasCorretagem.py --ticker PSSA3
+# ou
+python3 src/extratorNotasCorretagem.py -t PSSA3
+```
+
+### 4. Combinar filtros de ano e ticker
+```bash
+python3 src/extratorNotasCorretagem.py --year 2024 --ticker PSSA3
+```
+
+Quando combinados, o comportamento é:
+- o filtro de ano define quais arquivos PDF entram no processamento
+- o filtro de ticker reduz o resultado final para o ativo desejado
+
 ## Exemplos Práticos
 
 ### Exemplo 1: Extrair apenas dados de 2024
@@ -138,6 +154,7 @@ Ideias para expandir o filtro:
 - [ ] Filtro por intervalo de anos: `--year-from 2023 --year-to 2025`
 - [ ] Filtro por mês: `--year 2024 --month 03`
 - [ ] Múltiplos anos: `--years 2024,2025,2026`
+- [x] Filtro por ticker único: `--ticker PSSA3`
 - [ ] Padrão customizável de nome de arquivo
 
 ## Perguntas Frequentes
@@ -150,6 +167,12 @@ Ideias para expandir o filtro:
 
 ### P: Posso processar múltiplos anos?
 **R:** Atualmente não. Execute o comando separadamente ou sem filtro.
+
+### P: Posso filtrar por ticker?
+**R:** Sim. Use `--ticker` (ou `-t`). Exemplo: `python3 src/extratorNotasCorretagem.py --ticker PSSA3`
+
+### P: Posso usar ano e ticker ao mesmo tempo?
+**R:** Sim. Exemplo: `python3 src/extratorNotasCorretagem.py --year 2024 --ticker PSSA3`
 
 ### P: Onde é definido o padrão de ano?
 **R:** No regex `\b(19|20)\d{2}\b` dentro de `_extract_year_from_filename()`

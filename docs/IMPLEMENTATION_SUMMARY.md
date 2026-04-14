@@ -1,4 +1,27 @@
-# 📝 Sumário de Implementação - Filtro de Ano
+# 📝 Sumário de Implementação - Filtros de Ano e Ticker
+
+## ✅ Atualização (14/04/2026) - Filtro por Ticker
+
+### Objetivo
+Adicionar parametrização da execução para extração de operações de um único ticker (ex.: `PSSA3`).
+
+### Implementação realizada
+- Novo argumento CLI: `--ticker` (atalho `-t`)
+- Nova função `_normalize_ticker_value()` para normalização de comparação
+- Nova função `_filter_dataframe_by_ticker()` aplicada após a extração
+- Compatibilidade com execução combinada: `--year` + `--ticker`
+
+### Exemplo de uso
+```bash
+python3 src/extratorNotasCorretagem.py --ticker PSSA3
+python3 src/extratorNotasCorretagem.py --year 2024 --ticker PSSA3
+```
+
+### Testes
+- Inclusão de testes unitários em `tests/test_extrator_main.py`
+- Execução validada com sucesso (suite do arquivo passando)
+
+---
 
 ## ✅ Tarefa Concluída
 

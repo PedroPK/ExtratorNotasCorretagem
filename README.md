@@ -49,6 +49,21 @@ python3 src/extratorNotasCorretagem.py -y 2026
 
 Para mais detalhes, veja [docs/YEAR_FILTER.md](docs/YEAR_FILTER.md)
 
+## 🎯 Filtro por Ticker
+
+Agora também é possível extrair operações de um único ticker.
+
+```bash
+# Buscar apenas operações de PSSA3
+python3 src/extratorNotasCorretagem.py --ticker PSSA3
+
+# Atalho com -t
+python3 src/extratorNotasCorretagem.py -t VALE3
+
+# Combinar ano + ticker
+python3 src/extratorNotasCorretagem.py --year 2024 --ticker PSSA3
+```
+
 ## 🧪 Controle de Qualidade (QA/Testing)
 
 ExtratorNotasCorretagem possui suite completa de testes automatizados e análise estática de código:
