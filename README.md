@@ -813,7 +813,7 @@ Este projeto está licenciado sob a MIT License - veja o arquivo LICENSE para de
 
 ## 👤 Autor
 
-Pedro Pessoa Kron ([@pedropk](https://github.com/pedropk))
+Pedro ([@pedropk](https://github.com/pedropk))
 
 ## 🙏 Agradecimentos
 
@@ -828,4 +828,4 @@ Para dúvidas ou problemas, abra uma issue no GitHub ou envie um email.
 ---
 
 **Última atualização:** 20/02/2026  
-**Versão:** 1.1.5
+**Versão:** 1.2.0
