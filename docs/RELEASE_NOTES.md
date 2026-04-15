@@ -4,6 +4,43 @@ Este arquivo concentra as notas de correções e histórico de versões do proje
 
 ## 🔧 Correções Recentes
 
+### v1.2.2 (14/04/2026) - Ordenação de Arquivos Antes do Processamento
+
+**Objetivo:** Permitir controle da ordem em que os PDFs são processados.
+
+**Novidades:**
+- ✅ Novo argumento `--sort-by` (atalho `-s`) com três opções: `name`, `mtime`, `ctime`
+- ✅ Padrão é `name` (ordem alfabética pelo nome do arquivo)
+- ✅ `mtime` ordena pela data de modificação do arquivo
+- ✅ `ctime` ordena pela data de criação do arquivo
+- ✅ Funciona para PDFs diretos e PDFs dentro de ZIPs
+- ✅ Log informativo da ordenação escolhida antes de iniciar o processamento
+
+**Exemplos de uso:**
+```bash
+# Padrão: ordem pelo nome
+python3 src/extratorNotasCorretagem.py
+
+# Por data de modificação
+python3 src/extratorNotasCorretagem.py --sort-by mtime
+
+# Por data de criação
+python3 src/extratorNotasCorretagem.py -s ctime
+
+# Combinado
+python3 src/extratorNotasCorretagem.py -y 2024 -t PSSA3 --sort-by mtime
+```
+
+**Nota técnica:** Para PDFs dentro de ZIPs, `ctime` usa a data de criação do próprio arquivo ZIP (o formato ZIP não armazena `ctime` de entradas individuais). `mtime` usa a data de modificação registrada internamente pelo ZIP.
+
+**Arquivos impactados:**
+- `src/extratorNotasCorretagem.py`
+
+**Impacto:**
+- Sem quebra de compatibilidade (padrão é `name`, comportamento idêntico ao anterior)
+
+---
+
 ### v1.2.1 (14/04/2026) - Filtro por Ticker na Extração
 
 **Objetivo:** Permitir extração seletiva de operações para um único ticker via CLI.

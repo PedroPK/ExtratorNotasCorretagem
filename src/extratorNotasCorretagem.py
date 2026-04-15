@@ -840,7 +840,7 @@ def processar_pdf(pdf_file, senha=None):
     return dados_extraidos
 
 
-def analisar_pasta_ou_zip(caminho, year_filter: Optional[int] = None):
+def analisar_pasta_ou_zip(caminho, year_filter: Optional[int] = None, sort_by: str = "name"):
     todos_dados = []
     arquivos_processados = 0
     arquivos_erro = 0
@@ -876,12 +876,22 @@ def analisar_pasta_ou_zip(caminho, year_filter: Optional[int] = None):
 
         if caminho.endswith(".zip") or (os.path.isfile(caminho) and zipfile.is_zipfile(caminho)):
             tarefas_tipo = "single_zip"
+            zip_stat = os.stat(caminho)
             with zipfile.ZipFile(caminho, "r") as z:
                 for f in z.namelist():
                     if f.endswith(".pdf"):
                         # Aplica filtro de ano se especificado
                         if _should_process_file(f, year_filter):
-                            tarefas.append({"type": "zip_entry", "zip": caminho, "name": f})
+                            info = z.getinfo(f)
+                            e_mtime = datetime(*info.date_time).timestamp() if info.date_time[0] > 0 else zip_stat.st_mtime
+                            tarefas.append({
+                                "type": "zip_entry",
+                                "zip": caminho,
+                                "name": f,
+                                "_name": os.path.basename(f),
+                                "_mtime": e_mtime,
+                                "_ctime": zip_stat.st_ctime,
+                            })
                         else:
                             arquivos_ignorados += 1
 
@@ -891,7 +901,15 @@ def analisar_pasta_ou_zip(caminho, year_filter: Optional[int] = None):
                 if f.endswith(".pdf"):
                     # Aplica filtro de ano se especificado
                     if _should_process_file(f, year_filter):
-                        tarefas.append({"type": "file", "path": os.path.join(caminho, f)})
+                        full_path = os.path.join(caminho, f)
+                        st = os.stat(full_path)
+                        tarefas.append({
+                            "type": "file",
+                            "path": full_path,
+                            "_name": f,
+                            "_mtime": st.st_mtime,
+                            "_ctime": st.st_ctime,
+                        })
                     else:
                         arquivos_ignorados += 1
 
@@ -899,13 +917,23 @@ def analisar_pasta_ou_zip(caminho, year_filter: Optional[int] = None):
             for zf in [f for f in os.listdir(caminho) if f.endswith(".zip")]:
                 caminho_zip = os.path.join(caminho, zf)
                 try:
+                    zip_stat = os.stat(caminho_zip)
                     with zipfile.ZipFile(caminho_zip, "r") as z:
                         for entry in z.namelist():
                             if entry.endswith(".pdf"):
                                 # Aplica filtro de ano se especificado
                                 if _should_process_file(entry, year_filter):
+                                    info = z.getinfo(entry)
+                                    e_mtime = datetime(*info.date_time).timestamp() if info.date_time[0] > 0 else zip_stat.st_mtime
                                     tarefas.append(
-                                        {"type": "zip_entry", "zip": caminho_zip, "name": entry}
+                                        {
+                                            "type": "zip_entry",
+                                            "zip": caminho_zip,
+                                            "name": entry,
+                                            "_name": os.path.basename(entry),
+                                            "_mtime": e_mtime,
+                                            "_ctime": zip_stat.st_ctime,
+                                        }
                                     )
                                 else:
                                     arquivos_ignorados += 1
@@ -915,6 +943,12 @@ def analisar_pasta_ou_zip(caminho, year_filter: Optional[int] = None):
         else:
             logger.error(f"✗ Caminho não é arquivo ZIP ou pasta: {caminho}")
             return pd.DataFrame()
+
+        # Ordena a lista de tarefas pelo critério escolhido
+        _SORT_FIELDS = {"name": "_name", "mtime": "_mtime", "ctime": "_ctime"}
+        sort_field = _SORT_FIELDS.get(sort_by, "_name")
+        tarefas.sort(key=lambda t: t[sort_field])
+        logger.info(f"🗂️  Ordenação de arquivos: {sort_by} | {len(tarefas)} arquivo(s) a processar")
 
         # Processando PDFs sem barra de progresso (logs indicam progresso suficientemente)
         try:
@@ -1165,11 +1199,11 @@ if __name__ == "__main__":
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Exemplos de uso:
-  python3 extratorNotasCorretagem.py                    # Processa todos os PDFs
-  python3 extratorNotasCorretagem.py --year 2024        # Processa apenas PDFs de 2024
-  python3 extratorNotasCorretagem.py -y 2026            # Processa apenas PDFs de 2026
-    python3 extratorNotasCorretagem.py --ticker PSSA3     # Processa operações de um ticker
-    python3 extratorNotasCorretagem.py -y 2024 -t VALE3   # Combina filtro de ano e ticker
+  python3 extratorNotasCorretagem.py                         # Processa todos os PDFs (ordem: nome)
+  python3 extratorNotasCorretagem.py --year 2024             # Apenas PDFs de 2024
+  python3 extratorNotasCorretagem.py -y 2026 -t VALE3        # Ano + ticker
+  python3 extratorNotasCorretagem.py --sort-by mtime         # Ordena por data de modificação
+  python3 extratorNotasCorretagem.py --sort-by ctime         # Ordena por data de criação
         """,
     )
     parser.add_argument(
@@ -1186,10 +1220,18 @@ Exemplos de uso:
         default=None,
         help="Filtrar por ticker (ex: PSSA3)",
     )
+    parser.add_argument(
+        "--sort-by",
+        "-s",
+        choices=["name", "mtime", "ctime"],
+        default="name",
+        help="Critério de ordenação dos arquivos antes de processar (name=nome, mtime=modificação, ctime=criação). Padrão: name",
+    )
 
     args = parser.parse_args()
     year_filter = args.year
     ticker_filter = args.ticker
+    sort_by = args.sort_by
 
     # Caminho da pasta com os arquivos de entrada
     caminho_pasta = config.get_input_folder()
@@ -1201,6 +1243,7 @@ Exemplos de uso:
     logger.info(f"🔍 Caminho absoluto: {caminho_absoluto}\n")
     if ticker_filter:
         logger.info(f"🔎 Filtro de ticker ativo: {_normalize_ticker_value(ticker_filter)}")
+    logger.info(f"🗂️  Ordenação de arquivos: {sort_by}")
 
     # Se a pasta não existe, tenta informar melhor
     if not os.path.exists(caminho_absoluto):
@@ -1211,7 +1254,7 @@ Exemplos de uso:
         logger.info("   3. Coloque seus arquivos PDF ou ZIP dentro dessa pasta")
     else:
         logger.info("✓ Pasta encontrada. Processando...\n")
-        df = analisar_pasta_ou_zip(caminho_absoluto, year_filter=year_filter)
+        df = analisar_pasta_ou_zip(caminho_absoluto, year_filter=year_filter, sort_by=sort_by)
         df = _filter_dataframe_by_ticker(df, ticker_filter)
 
         if not df.empty:

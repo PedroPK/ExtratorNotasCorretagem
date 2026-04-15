@@ -81,6 +81,19 @@ python3 src/extratorNotasCorretagem.py -t PSSA3
 python3 src/extratorNotasCorretagem.py --year 2024 --ticker PSSA3
 ```
 
+### Controlar a ordem de processamento dos arquivos
+
+```bash
+# Padrão: ordem alfabética pelo nome
+python3 src/extratorNotasCorretagem.py
+
+# Por data de modificação
+python3 src/extratorNotasCorretagem.py --sort-by mtime
+
+# Por data de criação (atalho -s)
+python3 src/extratorNotasCorretagem.py -s ctime
+```
+
 ### Ver ajuda da CLI
 
 ```bash

@@ -64,6 +64,24 @@ python3 src/extratorNotasCorretagem.py -t VALE3
 python3 src/extratorNotasCorretagem.py --year 2024 --ticker PSSA3
 ```
 
+## 🗂️ Ordenação de Arquivos
+
+Por padrão, os PDFs são processados em ordem alfabética pelo nome. Use `--sort-by` para alterar:
+
+```bash
+# Padrão: ordem pelo nome do arquivo
+python3 src/extratorNotasCorretagem.py
+
+# Por data de modificação
+python3 src/extratorNotasCorretagem.py --sort-by mtime
+
+# Por data de criação
+python3 src/extratorNotasCorretagem.py --sort-by ctime
+
+# Atalho -s combinado com outros filtros
+python3 src/extratorNotasCorretagem.py -y 2024 -t PSSA3 -s mtime
+```
+
 ## 🧪 Controle de Qualidade (QA/Testing)
 
 ExtratorNotasCorretagem possui suite completa de testes automatizados e análise estática de código:
