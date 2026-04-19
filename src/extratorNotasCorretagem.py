@@ -8,6 +8,7 @@ import logging
 import signal
 import sys
 import argparse
+from collections import Counter
 from io import BytesIO
 from datetime import datetime
 from typing import Dict, List, Optional
@@ -785,9 +786,11 @@ def processar_pdf(pdf_file, senha=None):
                             texto_topo, data_pregao, ticker_mapping
                         )
 
-                        # Criar assinatra de operações já extraídas (Data + Ticker + Quantidade + Preço)
-                        # para evitar duplicatas
-                        operacoes_existentes = set()
+                        # Conta quantas vezes cada assinatura (Data+Ticker+Qtd+Preço) já existe
+                        # nas operações extraídas da tabela. Usa Counter (e não set) para
+                        # preservar operações idênticas legítimas — ex: 2 compras do mesmo ativo
+                        # na mesma data, mesma quantidade e mesmo preço na mesma nota.
+                        operacoes_existentes = Counter()
                         for op in dados_extraidos:
                             sig = (
                                 op.get("Data"),
@@ -795,10 +798,10 @@ def processar_pdf(pdf_file, senha=None):
                                 op.get("Quantidade"),
                                 op.get("Preço"),
                             )
-                            operacoes_existentes.add(sig)
+                            operacoes_existentes[sig] += 1
 
-                        # Adicionar apenas operações novas do texto
-                        novas_operacoes = 0
+                        # Pré-computa quantas vezes cada sig aparece no texto extraído
+                        texto_count = Counter()
                         for op in operacoes_texto:
                             sig = (
                                 op.get("Data"),
@@ -806,8 +809,24 @@ def processar_pdf(pdf_file, senha=None):
                                 op.get("Quantidade"),
                                 op.get("Preço"),
                             )
-                            if sig not in operacoes_existentes:
+                            texto_count[sig] += 1
+
+                        # Adiciona operações do texto apenas para a quantidade excedente.
+                        # Permite preservar operações idênticas legítimas (mesmo ativo,
+                        # mesma data, mesma qtd, mesmo preço na mesma nota) que o parser
+                        # de tabela pode ter capturado apenas parcialmente.
+                        novas_operacoes = 0
+                        texto_adicionadas = Counter()
+                        for op in operacoes_texto:
+                            sig = (
+                                op.get("Data"),
+                                op.get("Ticker"),
+                                op.get("Quantidade"),
+                                op.get("Preço"),
+                            )
+                            if texto_adicionadas[sig] + operacoes_existentes[sig] < texto_count[sig]:
                                 dados_extraidos.append(op)
+                                texto_adicionadas[sig] += 1
                                 novas_operacoes += 1
 
                         if novas_operacoes > 0:

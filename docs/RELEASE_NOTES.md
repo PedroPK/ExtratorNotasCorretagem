@@ -4,6 +4,49 @@ Este arquivo concentra as notas de correções e histórico de versões do proje
 
 ## 🔧 Correções Recentes
 
+### v1.2.3 (18/04/2026) - Correção: Operações Idênticas na Mesma Nota Perdidas
+
+**Problema reportado:** Notas de corretagem com 2 lançamentos idênticos (mesmo ticker,
+data, quantidade e preço — ex: PSSA3, Setembro/2022, compra de 100 cotas a R$22,08)
+produziam apenas 1 registro no XLSX, quando o esperado eram 2.
+
+**Causa raiz:** O fallback de extração por texto usava um `set()` para rastrear
+assinaturas de operações já extraídas pela tabela. Por ser um conjunto, assinaturas
+repetidas colapsavam para uma única entrada. Quando o parser de tabela (pdfplumber)
+capturava apenas 1 das 2 linhas idênticas, o fallback via texto encontrava ambas —
+mas as duas eram bloqueadas porque a assinatura já estava no set. Resultado: 1
+operação ao invés de 2.
+
+**Correção:** Substituída a estrutura `set` por `collections.Counter`. Agora a lógica
+rastreia *quantas vezes* cada assinatura já existe nas operações extraídas da tabela e
+adiciona do texto apenas o excedente (texto_count − tabela_count). Operações idênticas
+legítimas são preservadas sem introduzir duplicatas espúrias.
+
+**Cenários cobertos pela correção:**
+- Tabela captura 1 de 2 idênticas → texto adiciona a 2ª → total: 2 ✅
+- Tabela captura as 2 → texto não adiciona nenhuma → total: 2 ✅
+- Tabela captura 0 → texto adiciona as 2 → total: 2 ✅
+- Operação única sem duplicata → comportamento inalterado ✅
+
+**Novos testes adicionados (`TestTextFallbackDeduplication`):**
+- `test_two_identical_ops_table_finds_one_text_finds_two` — regressão exata do bug
+- `test_two_identical_ops_table_finds_both_text_finds_both` — sem duplicação extra
+- `test_two_identical_ops_table_finds_none_text_finds_both` — tabela vazia
+- `test_no_false_additions_when_table_already_complete` — caso padrão sem duplicata
+- `test_distinct_ops_are_not_blocked` — ops diferentes não se bloqueiam
+- `test_three_identical_ops_table_finds_one` — caso extremo: 3 idênticas
+- `test_mixed_same_day_different_prices` — mesmo ticker/dia mas preços diferentes
+
+**Arquivos impactados:**
+- `src/extratorNotasCorretagem.py`
+- `tests/test_extrator_main.py`
+
+**Impacto:**
+- Correção de dados: notas com lançamentos repetidos agora extraem todas as ocorrências
+- Sem quebra de compatibilidade
+
+---
+
 ### v1.2.2 (14/04/2026) - Ordenação de Arquivos Antes do Processamento
 
 **Objetivo:** Permitir controle da ordem em que os PDFs são processados.

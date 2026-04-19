@@ -433,3 +433,151 @@ class TestIntegration:
         
         assert "2024 janeiro.pdf" in files_2024
         assert "2025 fevereiro.pdf" not in files_2024
+
+
+class TestTextFallbackDeduplication:
+    """Testes para a lógica de deduplicação no fallback de extração por texto.
+
+    Cenário reportado: nota de corretagem de Setembro/2022 (PSSA3) continha
+    2 lançamentos idênticos de compra (100 cotas, R$22,08) mas apenas 1 era
+    extraído. Causa raiz: dedup usava set(), que não preserva multiplicidade.
+    Fix: Counter() preserva quantas vezes cada assinatura já existe e permite
+    adicionar apenas o excedente encontrado no texto.
+    """
+
+    def _build_sig(self, op):
+        return (op.get("Data"), op.get("Ticker"), op.get("Quantidade"), op.get("Preço"))
+
+    def _simulate_fallback_dedup(self, dados_extraidos, operacoes_texto):
+        """Simula exatamente a lógica de dedup usada no código de produção."""
+        from collections import Counter
+
+        operacoes_existentes = Counter()
+        for op in dados_extraidos:
+            sig = self._build_sig(op)
+            operacoes_existentes[sig] += 1
+
+        texto_count = Counter()
+        for op in operacoes_texto:
+            sig = self._build_sig(op)
+            texto_count[sig] += 1
+
+        resultado = list(dados_extraidos)
+        texto_adicionadas = Counter()
+        for op in operacoes_texto:
+            sig = self._build_sig(op)
+            if texto_adicionadas[sig] + operacoes_existentes[sig] < texto_count[sig]:
+                resultado.append(op)
+                texto_adicionadas[sig] += 1
+
+        return resultado
+
+    # --- Caso do bug reportado ---
+
+    def test_two_identical_ops_table_finds_one_text_finds_two(self):
+        """Regressão: tabela extrai 1 de 2 lançamentos idênticos; texto extrai ambos.
+        Resultado esperado: 2 operações no total (e não apenas 1).
+
+        Este é exatamente o cenário de Setembro/2022 com PSSA3 (100 cotas, R$22,08).
+        """
+        op = {"Data": "15/09/2022", "Ticker": "PSSA3", "Operação": "C",
+              "Quantidade": "100", "Preço": "22.08"}
+
+        dados_tabela = [op.copy()]          # tabela capturou apenas 1
+        ops_texto = [op.copy(), op.copy()]  # texto encontrou ambas
+
+        resultado = self._simulate_fallback_dedup(dados_tabela, ops_texto)
+
+        assert len(resultado) == 2, (
+            "Esperado 2 operações: a que a tabela extraiu + a que o texto encontrou a mais"
+        )
+
+    def test_two_identical_ops_table_finds_both_text_finds_both(self):
+        """Quando a tabela já extraiu as 2 operações idênticas, o texto não deve duplicar."""
+        op = {"Data": "15/09/2022", "Ticker": "PSSA3", "Operação": "C",
+              "Quantidade": "100", "Preço": "22.08"}
+
+        dados_tabela = [op.copy(), op.copy()]   # tabela capturou as 2
+        ops_texto = [op.copy(), op.copy()]       # texto também encontrou as 2
+
+        resultado = self._simulate_fallback_dedup(dados_tabela, ops_texto)
+
+        assert len(resultado) == 2, (
+            "Tabela já tinha 2 e texto também achou 2 — não deve adicionar nenhuma nova"
+        )
+
+    def test_two_identical_ops_table_finds_none_text_finds_both(self):
+        """Quando a tabela não extraiu nada e o texto encontrou 2 idênticas, ambas devem ser adicionadas."""
+        op = {"Data": "15/09/2022", "Ticker": "PSSA3", "Operação": "C",
+              "Quantidade": "100", "Preço": "22.08"}
+
+        dados_tabela = []                        # tabela não achou nada
+        ops_texto = [op.copy(), op.copy()]       # texto encontrou as 2
+
+        resultado = self._simulate_fallback_dedup(dados_tabela, ops_texto)
+
+        assert len(resultado) == 2, (
+            "Tabela vazia + texto com 2 idênticas → ambas devem constar no resultado"
+        )
+
+    def test_no_false_additions_when_table_already_complete(self):
+        """Texto encontra 1 operação que a tabela já extraiu — não deve duplicar."""
+        op = {"Data": "15/09/2022", "Ticker": "PSSA3", "Operação": "C",
+              "Quantidade": "100", "Preço": "22.08"}
+
+        dados_tabela = [op.copy()]   # tabela capturou 1
+        ops_texto = [op.copy()]      # texto também achou 1 (mesma)
+
+        resultado = self._simulate_fallback_dedup(dados_tabela, ops_texto)
+
+        assert len(resultado) == 1, (
+            "Tabela e texto têm a mesma 1 operação — não deve duplicar"
+        )
+
+    def test_distinct_ops_are_not_blocked(self):
+        """Operações diferentes na mesma nota não se bloqueiam entre si."""
+        op_pssa3 = {"Data": "15/09/2022", "Ticker": "PSSA3", "Operação": "C",
+                    "Quantidade": "100", "Preço": "22.08"}
+        op_vale3 = {"Data": "15/09/2022", "Ticker": "VALE3", "Operação": "C",
+                    "Quantidade": "200", "Preço": "68.50"}
+
+        dados_tabela = [op_pssa3.copy()]         # tabela só achou PSSA3
+        ops_texto = [op_pssa3.copy(), op_vale3.copy()]  # texto achou as duas
+
+        resultado = self._simulate_fallback_dedup(dados_tabela, ops_texto)
+
+        tickers = [r["Ticker"] for r in resultado]
+        assert "PSSA3" in tickers
+        assert "VALE3" in tickers
+        assert len(resultado) == 2
+
+    def test_three_identical_ops_table_finds_one(self):
+        """Caso extremo: 3 lançamentos idênticos, tabela captura 1, texto captura 3."""
+        op = {"Data": "15/09/2022", "Ticker": "PSSA3", "Operação": "C",
+              "Quantidade": "100", "Preço": "22.08"}
+
+        dados_tabela = [op.copy()]
+        ops_texto = [op.copy(), op.copy(), op.copy()]
+
+        resultado = self._simulate_fallback_dedup(dados_tabela, ops_texto)
+
+        assert len(resultado) == 3
+
+    def test_mixed_same_day_different_prices(self):
+        """Compras no mesmo dia, mesmo ticker, mas preços diferentes — cada uma é única."""
+        op1 = {"Data": "15/09/2022", "Ticker": "PSSA3", "Operação": "C",
+               "Quantidade": "100", "Preço": "22.08"}
+        op2 = {"Data": "15/09/2022", "Ticker": "PSSA3", "Operação": "C",
+               "Quantidade": "100", "Preço": "22.15"}  # preço diferente
+
+        dados_tabela = [op1.copy()]
+        ops_texto = [op1.copy(), op2.copy()]
+
+        resultado = self._simulate_fallback_dedup(dados_tabela, ops_texto)
+
+        # op1 já está na tabela, op2 é nova → total 2
+        assert len(resultado) == 2
+        precos = [r["Preço"] for r in resultado]
+        assert "22.08" in precos
+        assert "22.15" in precos
+
