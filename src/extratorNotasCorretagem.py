@@ -605,6 +605,7 @@ def processar_pdf(pdf_file, senha=None):
         arquivo_nome = getattr(pdf_file, "name", "pdf_temporario.pdf")
 
     try:
+        _inicio_processamento = datetime.now()
         logger.info(f"📄 Processando arquivo: {arquivo_nome}")
         sys.stderr.flush()
 
@@ -845,16 +846,19 @@ def processar_pdf(pdf_file, senha=None):
                     continue
 
         total_registros = len(dados_extraidos)
+        _tempo_processamento = (datetime.now() - _inicio_processamento).total_seconds()
         if total_registros > 0:
-            logger.info(f"✓ {arquivo_nome}: {total_registros} registro(s) extraído(s) com sucesso")
+            logger.info(f"✓ {arquivo_nome}: {total_registros} registro(s) extraído(s) com sucesso [{_tempo_processamento:.2f}s]")
         else:
-            logger.warning(f"⚠️  {arquivo_nome}: Nenhum registro extraído")
+            logger.warning(f"⚠️  {arquivo_nome}: Nenhum registro extraído [{_tempo_processamento:.2f}s]")
         sys.stderr.flush()
 
     except FileNotFoundError:
-        logger.error(f"✗ Arquivo não encontrado: {arquivo_nome}")
+        _tempo_processamento = (datetime.now() - _inicio_processamento).total_seconds()
+        logger.error(f"✗ Arquivo não encontrado: {arquivo_nome} [{_tempo_processamento:.2f}s]")
     except Exception as e:
-        logger.error(f"✗ Erro ao processar {arquivo_nome}: {str(e)}")
+        _tempo_processamento = (datetime.now() - _inicio_processamento).total_seconds()
+        logger.error(f"✗ Erro ao processar {arquivo_nome}: {str(e)} [{_tempo_processamento:.2f}s]")
 
     return dados_extraidos
 
@@ -864,6 +868,7 @@ def analisar_pasta_ou_zip(caminho, year_filter: Optional[int] = None, sort_by: s
     arquivos_processados = 0
     arquivos_erro = 0
     arquivos_ignorados = 0
+    _inicio_total = datetime.now()
 
     try:
         logger.info("=" * 60)
@@ -1010,6 +1015,7 @@ def analisar_pasta_ou_zip(caminho, year_filter: Optional[int] = None, sort_by: s
             # stop_processing já será True pelo handler; fora do laço iremos exportar o parcial
 
         # Resumo final
+        _tempo_total = (datetime.now() - _inicio_total).total_seconds()
         logger.info("\n" + "=" * 60)
         logger.info("📊 RESUMO DO PROCESSAMENTO")
         logger.info("=" * 60)
@@ -1019,6 +1025,7 @@ def analisar_pasta_ou_zip(caminho, year_filter: Optional[int] = None, sort_by: s
         if arquivos_ignorados > 0:
             logger.info(f"⏭️ Arquivos ignorados (fora do filtro de ano): {arquivos_ignorados}")
         logger.info(f"📈 Total de registros extraídos: {len(todos_dados)}")
+        logger.info(f"⏱️  Tempo total de processamento: {_tempo_total:.2f}s")
         logger.info("=" * 60)
 
         df = pd.DataFrame(todos_dados)
