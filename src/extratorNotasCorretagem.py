@@ -58,6 +58,21 @@ def _handle_sigint(signum, frame):
 signal.signal(signal.SIGINT, _handle_sigint)
 
 
+def _format_elapsed(seconds: float) -> str:
+    """Formata segundos em string legível: 's', 'm s' ou 'h m s'."""
+    total = int(seconds)
+    h = total // 3600
+    m = (total % 3600) // 60
+    s = total % 60
+    cs = round((seconds % 1) * 100)
+    frac = f".{cs:02d}"
+    if h > 0:
+        return f"{h}h {m}m {s}{frac}s"
+    if m > 0:
+        return f"{m}m {s}{frac}s"
+    return f"{seconds:.2f}s"
+
+
 def _count_total_pdfs(caminho):
     """Conta o total estimado de PDFs que serão processados a partir do caminho.
     Suporta arquivo ZIP único, pasta com PDFs e/ou ZIPs, e caminho para pasta com PDFs diretos.
@@ -848,17 +863,17 @@ def processar_pdf(pdf_file, senha=None):
         total_registros = len(dados_extraidos)
         _tempo_processamento = (datetime.now() - _inicio_processamento).total_seconds()
         if total_registros > 0:
-            logger.info(f"✓ {arquivo_nome}: {total_registros} registro(s) extraído(s) com sucesso [{_tempo_processamento:.2f}s]")
+            logger.info(f"✓ {arquivo_nome}: {total_registros} registro(s) extraído(s) com sucesso [{_format_elapsed(_tempo_processamento)}]")
         else:
-            logger.warning(f"⚠️  {arquivo_nome}: Nenhum registro extraído [{_tempo_processamento:.2f}s]")
+            logger.warning(f"⚠️  {arquivo_nome}: Nenhum registro extraído [{_format_elapsed(_tempo_processamento)}]")
         sys.stderr.flush()
 
     except FileNotFoundError:
         _tempo_processamento = (datetime.now() - _inicio_processamento).total_seconds()
-        logger.error(f"✗ Arquivo não encontrado: {arquivo_nome} [{_tempo_processamento:.2f}s]")
+        logger.error(f"✗ Arquivo não encontrado: {arquivo_nome} [{_format_elapsed(_tempo_processamento)}]")
     except Exception as e:
         _tempo_processamento = (datetime.now() - _inicio_processamento).total_seconds()
-        logger.error(f"✗ Erro ao processar {arquivo_nome}: {str(e)} [{_tempo_processamento:.2f}s]")
+        logger.error(f"✗ Erro ao processar {arquivo_nome}: {str(e)} [{_format_elapsed(_tempo_processamento)}]")
 
     return dados_extraidos
 
@@ -1025,7 +1040,7 @@ def analisar_pasta_ou_zip(caminho, year_filter: Optional[int] = None, sort_by: s
         if arquivos_ignorados > 0:
             logger.info(f"⏭️ Arquivos ignorados (fora do filtro de ano): {arquivos_ignorados}")
         logger.info(f"📈 Total de registros extraídos: {len(todos_dados)}")
-        logger.info(f"⏱️  Tempo total de processamento: {_tempo_total:.2f}s")
+        logger.info(f"⏱️  Tempo total de processamento: {_format_elapsed(_tempo_total)}")
         logger.info("=" * 60)
 
         df = pd.DataFrame(todos_dados)
