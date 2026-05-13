@@ -11,7 +11,7 @@ import argparse
 from collections import Counter
 from io import BytesIO
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 from config import get_config
 
 # Carregar configurações
@@ -878,7 +878,12 @@ def processar_pdf(pdf_file, senha=None):
     return dados_extraidos
 
 
-def analisar_pasta_ou_zip(caminho, year_filter: Optional[int] = None, sort_by: str = "name"):
+def analisar_pasta_ou_zip(
+    caminho,
+    year_filter: Optional[int] = None,
+    sort_by: str = "name",
+    progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+):
     todos_dados = []
     arquivos_processados = 0
     arquivos_erro = 0
@@ -989,7 +994,26 @@ def analisar_pasta_ou_zip(caminho, year_filter: Optional[int] = None, sort_by: s
         tarefas.sort(key=lambda t: t[sort_field])
         logger.info(f"🗂️  Ordenação de arquivos: {sort_by} | {len(tarefas)} arquivo(s) a processar")
 
-        # Processando PDFs sem barra de progresso (logs indicam progresso suficientemente)
+        def _notify_progress(current_file: str, stage: str) -> None:
+            if progress_callback is None:
+                return
+            try:
+                progress_callback(
+                    {
+                        "stage": stage,
+                        "current_file": current_file,
+                        "processed_files": arquivos_processados,
+                        "failed_files": arquivos_erro,
+                        "total_files": len(tarefas),
+                    }
+                )
+            except Exception:
+                # Callback de progresso nunca deve interromper o processamento principal.
+                pass
+
+        if tarefas:
+            _notify_progress("", "started")
+
         try:
             for tarefa in tarefas:
                 if stop_processing:
@@ -998,14 +1022,19 @@ def analisar_pasta_ou_zip(caminho, year_filter: Optional[int] = None, sort_by: s
                     )
                     break
 
+                current_file = tarefa.get("_name") or os.path.basename(tarefa.get("path", ""))
+                _notify_progress(current_file, "processing")
+
                 if tarefa["type"] == "file":
                     try:
                         dados = processar_pdf(tarefa["path"])
                         todos_dados.extend(dados)
                         arquivos_processados += 1
+                        _notify_progress(current_file, "processed")
                     except Exception as e:
                         logger.error(f"✗ Erro ao processar {tarefa['path']}: {str(e)}")
                         arquivos_erro += 1
+                        _notify_progress(current_file, "error")
 
                 elif tarefa["type"] == "zip_entry":
                     try:
@@ -1017,11 +1046,13 @@ def analisar_pasta_ou_zip(caminho, year_filter: Optional[int] = None, sort_by: s
                                 dados = processar_pdf(bio)
                                 todos_dados.extend(dados)
                                 arquivos_processados += 1
+                                _notify_progress(current_file, "processed")
                     except Exception as e:
                         logger.error(
                             f"✗ Erro ao processar {tarefa['name']} do ZIP {os.path.basename(tarefa['zip'])}: {str(e)}"
                         )
                         arquivos_erro += 1
+                        _notify_progress(current_file, "error")
 
         except KeyboardInterrupt:
             logger.warning(
@@ -1042,6 +1073,9 @@ def analisar_pasta_ou_zip(caminho, year_filter: Optional[int] = None, sort_by: s
         logger.info(f"📈 Total de registros extraídos: {len(todos_dados)}")
         logger.info(f"⏱️  Tempo total de processamento: {_format_elapsed(_tempo_total)}")
         logger.info("=" * 60)
+
+        if tarefas:
+            _notify_progress("", "finished")
 
         df = pd.DataFrame(todos_dados)
         return df

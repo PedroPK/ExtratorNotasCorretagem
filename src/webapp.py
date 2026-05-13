@@ -5,9 +5,12 @@ from __future__ import annotations
 
 import mimetypes
 import os
+import shutil
 import tempfile
+import threading
+import uuid
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -30,6 +33,9 @@ app = FastAPI(
 config = get_config()
 OUTPUT_DIR = Path(config.resolve_path(config.get_output_folder()))
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+_JOBS_LOCK = threading.Lock()
+_PROCESS_JOBS: Dict[str, Dict[str, Any]] = {}
 
 
 HTML_PAGE = """<!doctype html>
@@ -155,6 +161,48 @@ HTML_PAGE = """<!doctype html>
       display: grid;
       align-content: start;
       gap: 14px;
+    }
+
+    .progress-wrap {
+      display: grid;
+      gap: 8px;
+      margin-top: 2px;
+    }
+
+    .progress-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: var(--muted);
+      font-size: 0.88rem;
+    }
+
+    .progress-track {
+      width: 100%;
+      height: 10px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      overflow: hidden;
+    }
+
+    .progress-bar {
+      width: 0%;
+      height: 100%;
+      background: linear-gradient(90deg, #38bdf8 0%, #34d399 100%);
+      transition: width 240ms ease;
+    }
+
+    .current-file {
+      font-size: 0.86rem;
+      color: #cbe7ff;
+      background: rgba(125, 211, 252, 0.08);
+      border: 1px solid rgba(125, 211, 252, 0.18);
+      border-radius: 10px;
+      padding: 8px 10px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     .status-pill {
@@ -354,6 +402,16 @@ HTML_PAGE = """<!doctype html>
         <p class="status-title"><span>Processamento</span><span id="queue-state">Pronto</span></p>
         <div class="status-box">
           <div class="status-pill"><span class="pulse"></span><span id="status-label">Aguardando arquivos</span></div>
+          <div id="progress-wrap" class="progress-wrap hidden">
+            <div class="progress-meta">
+              <span id="progress-count">0 / 0 arquivos</span>
+              <span id="progress-percent">0%</span>
+            </div>
+            <div class="progress-track">
+              <div id="progress-bar" class="progress-bar"></div>
+            </div>
+            <div id="current-file" class="current-file hidden"></div>
+          </div>
           <div id="status-message" class="message">Selecione os arquivos e clique em processar.</div>
           <div id="download-slot" class="hidden"></div>
         </div>
@@ -441,6 +499,11 @@ HTML_PAGE = """<!doctype html>
     const previewTable = document.getElementById('preview-table');
     const previewHead = previewTable.querySelector('thead');
     const previewBody = previewTable.querySelector('tbody');
+    const progressWrap = document.getElementById('progress-wrap');
+    const progressCount = document.getElementById('progress-count');
+    const progressPercent = document.getElementById('progress-percent');
+    const progressBar = document.getElementById('progress-bar');
+    const currentFile = document.getElementById('current-file');
 
     const metrics = {
       records: document.getElementById('metric-records'),
@@ -453,6 +516,37 @@ HTML_PAGE = """<!doctype html>
       statusLabel.textContent = title;
       statusMessage.textContent = message;
       queueState.textContent = state;
+    }
+
+    function resetProgress() {
+      progressWrap.classList.add('hidden');
+      progressCount.textContent = '0 / 0 arquivos';
+      progressPercent.textContent = '0%';
+      progressBar.style.width = '0%';
+      currentFile.classList.add('hidden');
+      currentFile.textContent = '';
+    }
+
+    function updateProgress(processed, total, fileName = '') {
+      if (!total || total < 1) {
+        resetProgress();
+        return;
+      }
+
+      const safeProcessed = Math.max(0, Math.min(processed, total));
+      const percent = Math.round((safeProcessed / total) * 100);
+      progressWrap.classList.remove('hidden');
+      progressCount.textContent = `${safeProcessed} / ${total} arquivos`;
+      progressPercent.textContent = `${percent}%`;
+      progressBar.style.width = `${percent}%`;
+
+      if (fileName) {
+        currentFile.textContent = `Processando agora: ${fileName}`;
+        currentFile.classList.remove('hidden');
+      } else {
+        currentFile.classList.add('hidden');
+        currentFile.textContent = '';
+      }
     }
 
     function refreshFileCount() {
@@ -538,6 +632,45 @@ HTML_PAGE = """<!doctype html>
       queueState.textContent = loading ? 'Processando...' : 'Pronto';
     }
 
+    async function startProcessing(formData) {
+      const response = await fetch('/api/process/start', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.detail || payload.message || 'Falha ao iniciar o processamento.');
+      }
+      return payload;
+    }
+
+    async function pollJobUntilFinished(jobId) {
+      while (true) {
+        const response = await fetch(`/api/process/status/${jobId}`);
+        const payload = await response.json();
+
+        if (!response.ok) {
+          throw new Error(payload.detail || 'Não foi possível consultar o status do processamento.');
+        }
+
+        updateProgress(payload.processed_files || 0, payload.total_files || 0, payload.current_file || '');
+        if (payload.status === 'running') {
+          setStatus('Processando', payload.message || 'Extraindo dados dos arquivos...', 'Em andamento');
+        }
+
+        if (payload.status === 'completed') {
+          return payload.result;
+        }
+
+        if (payload.status === 'failed') {
+          throw new Error(payload.error || 'Falha ao processar arquivos.');
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 700));
+      }
+    }
+
     fileInput.addEventListener('change', refreshFileCount);
 
     ['dragenter', 'dragover'].forEach((eventName) => {
@@ -599,19 +732,15 @@ HTML_PAGE = """<!doctype html>
       formData.append('output_format', outputFormat);
 
       clearPreview();
+      resetProgress();
       setLoading(true);
-      setStatus('Processando', 'O backend está extraindo os dados agora.', 'Em andamento');
+      setStatus('Processando', 'Preparando arquivos para processamento...', 'Em andamento');
 
       try {
-        const response = await fetch('/api/process', {
-          method: 'POST',
-          body: formData,
-        });
+        const started = await startProcessing(formData);
+        const payload = await pollJobUntilFinished(started.job_id);
 
-        const payload = await response.json();
-        if (!response.ok) {
-          throw new Error(payload.detail || payload.message || 'Falha ao processar arquivos.');
-        }
+        updateProgress(payload.files_received || 0, payload.files_received || 0, '');
 
         results.classList.remove('hidden');
         metrics.records.textContent = String(payload.records_extracted || 0);
@@ -628,6 +757,7 @@ HTML_PAGE = """<!doctype html>
           results.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
       } catch (error) {
+        resetProgress();
         setStatus('Erro', error.message, 'Falha');
         tableMessage.textContent = error.message;
         tableMessage.classList.remove('hidden');
@@ -638,9 +768,184 @@ HTML_PAGE = """<!doctype html>
     });
 
     refreshFileCount();
+  resetProgress();
   </script>
 </body>
 </html>"""
+
+
+def _update_job(job_id: str, **changes: Any) -> None:
+  with _JOBS_LOCK:
+    job = _PROCESS_JOBS.get(job_id)
+    if not job:
+      return
+    job.update(changes)
+
+
+def _get_job(job_id: str) -> Optional[Dict[str, Any]]:
+  with _JOBS_LOCK:
+    job = _PROCESS_JOBS.get(job_id)
+    if not job:
+      return None
+    snapshot = dict(job)
+  return snapshot
+
+
+def _build_processing_result(
+  temp_path: Path,
+  year: Optional[int],
+  ticker: Optional[str],
+  sort_by: str,
+  output_format: Optional[str],
+  files_received: int,
+  e2e_demo: bool,
+  progress_callback=None,
+) -> Dict[str, Any]:
+  before = _snapshot_output_files()
+  if e2e_demo:
+    if progress_callback:
+      progress_callback(
+        {
+          "stage": "started",
+          "current_file": "e2e_sample.pdf",
+          "processed_files": 0,
+          "failed_files": 0,
+          "total_files": files_received,
+        }
+      )
+      progress_callback(
+        {
+          "stage": "processed",
+          "current_file": "e2e_sample.pdf",
+          "processed_files": files_received,
+          "failed_files": 0,
+          "total_files": files_received,
+        }
+      )
+      progress_callback(
+        {
+          "stage": "finished",
+          "current_file": "",
+          "processed_files": files_received,
+          "failed_files": 0,
+          "total_files": files_received,
+        }
+      )
+    df = _build_e2e_demo_dataframe()
+  else:
+    try:
+      df = analisar_pasta_ou_zip(
+        str(temp_path),
+        year_filter=year,
+        sort_by=sort_by,
+        progress_callback=progress_callback,
+      )
+    except TypeError:
+      # Compatibilidade com versões/mocks sem parâmetro progress_callback.
+      df = analisar_pasta_ou_zip(
+        str(temp_path),
+        year_filter=year,
+        sort_by=sort_by,
+      )
+
+  df = _filter_dataframe_by_ticker(df, ticker)
+
+  if df.empty:
+    return {
+      "message": "Nenhum registro foi extraído dos arquivos enviados.",
+      "records_extracted": 0,
+      "files_received": files_received,
+      "export_format": (output_format or config.get_output_format()).lower(),
+      "preview_rows": [],
+      "columns": [],
+      "filename": None,
+      "download_url": None,
+    }
+
+  df_preview = ordenar_dados_por_data(df.copy())
+  exported = exportar_dados(df, output_format, ticker)
+  if not exported:
+    raise RuntimeError("Os dados foram extraídos, mas não foi possível exportar o arquivo.")
+
+  exported_file = _find_latest_export(before)
+  preview_rows = df_preview.head(80).to_dict(orient="records")
+
+  return {
+    "message": f"Processamento concluído com {len(df_preview)} registro(s).",
+    "records_extracted": len(df_preview),
+    "files_received": files_received,
+    "export_format": (output_format or config.get_output_format()).lower(),
+    "columns": list(df_preview.columns),
+    "preview_rows": preview_rows,
+    "filename": exported_file.name if exported_file else None,
+    "download_url": f"/api/download/{exported_file.name}" if exported_file else None,
+  }
+
+
+def _run_processing_job(
+  job_id: str,
+  temp_path: Path,
+  year: Optional[int],
+  ticker: Optional[str],
+  sort_by: str,
+  output_format: Optional[str],
+  files_received: int,
+  e2e_demo: bool,
+) -> None:
+  def on_progress(progress: Dict[str, Any]) -> None:
+    total_files = int(progress.get("total_files") or 0)
+    processed_files = int(progress.get("processed_files") or 0)
+    current_file = str(progress.get("current_file") or "")
+    stage = str(progress.get("stage") or "processing")
+    if stage == "processing" and current_file:
+      message = f"Processando arquivo: {current_file}"
+    elif stage == "processed":
+      message = f"Arquivo concluído: {current_file}"
+    elif stage == "error":
+      message = f"Arquivo com erro: {current_file}"
+    else:
+      message = "Processando arquivos..."
+
+    _update_job(
+      job_id,
+      status="running",
+      total_files=total_files,
+      processed_files=processed_files,
+      current_file=current_file,
+      message=message,
+    )
+
+  try:
+    _update_job(job_id, status="running", message="Iniciando processamento...")
+    result = _build_processing_result(
+      temp_path=temp_path,
+      year=year,
+      ticker=ticker,
+      sort_by=sort_by,
+      output_format=output_format,
+      files_received=files_received,
+      e2e_demo=e2e_demo,
+      progress_callback=on_progress,
+    )
+    _update_job(
+      job_id,
+      status="completed",
+      message=result.get("message") or "Processamento concluído.",
+      current_file="",
+      processed_files=files_received,
+      total_files=files_received,
+      result=result,
+    )
+  except Exception as exc:
+    _update_job(
+      job_id,
+      status="failed",
+      error=str(exc),
+      message="Falha durante o processamento.",
+      current_file="",
+    )
+  finally:
+    shutil.rmtree(temp_path, ignore_errors=True)
 
 
 def _safe_output_path(filename: str) -> Path:
@@ -711,58 +1016,96 @@ async def process_files(
         temp_path = Path(temp_dir)
         await _persist_uploads(files, temp_path)
 
-        before = _snapshot_output_files()
-        if _should_use_e2e_demo(files):
-            df = _build_e2e_demo_dataframe()
-        else:
-            df = await run_in_threadpool(
-                analisar_pasta_ou_zip,
-                str(temp_path),
-                year_filter=year,
-                sort_by=sort_by,
+        try:
+            content = await run_in_threadpool(
+                _build_processing_result,
+                temp_path,
+                year,
+                ticker,
+                sort_by,
+                output_format,
+                len(files),
+                _should_use_e2e_demo(files),
+                None,
             )
-        df = _filter_dataframe_by_ticker(df, ticker)
-
-        if df.empty:
-            return JSONResponse(
-                status_code=200,
-                content={
-                    "message": "Nenhum registro foi extraído dos arquivos enviados.",
-                    "records_extracted": 0,
-                    "files_received": len(files),
-                    "export_format": (output_format or config.get_output_format()).lower(),
-                    "preview_rows": [],
-                    "columns": [],
-                    "filename": None,
-                    "download_url": None,
-                },
-            )
-
-        df_preview = ordenar_dados_por_data(df.copy())
-        exported = await run_in_threadpool(
-            exportar_dados,
-            df,
-            output_format,
-            ticker,
-        )
-        if not exported:
-            raise HTTPException(status_code=500, detail="Os dados foram extraídos, mas não foi possível exportar o arquivo.")
-
-        exported_file = _find_latest_export(before)
-        preview_rows = df_preview.head(80).to_dict(orient="records")
-
-        content = {
-            "message": f"Processamento concluído com {len(df_preview)} registro(s).",
-            "records_extracted": len(df_preview),
-            "files_received": len(files),
-            "export_format": (output_format or config.get_output_format()).lower(),
-            "columns": list(df_preview.columns),
-            "preview_rows": preview_rows,
-            "filename": exported_file.name if exported_file else None,
-            "download_url": f"/api/download/{exported_file.name}" if exported_file else None,
-        }
+        except RuntimeError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
 
         return JSONResponse(content=content)
+
+
+@app.post("/api/process/start")
+async def start_process_job(
+    files: List[UploadFile] = File(...),
+    year: Optional[int] = Form(default=None),
+    ticker: Optional[str] = Form(default=None),
+    sort_by: str = Form(default="name"),
+    output_format: Optional[str] = Form(default=None),
+):
+    if not files:
+        raise HTTPException(status_code=400, detail="Envie ao menos um arquivo PDF ou ZIP.")
+
+    temp_path = Path(tempfile.mkdtemp(prefix="extrator_web_job_"))
+    await _persist_uploads(files, temp_path)
+
+    job_id = uuid.uuid4().hex
+    job_state = {
+        "job_id": job_id,
+        "status": "queued",
+        "message": "Fila criada. Processamento será iniciado.",
+        "current_file": "",
+        "processed_files": 0,
+        "total_files": len(files),
+        "result": None,
+        "error": None,
+    }
+    with _JOBS_LOCK:
+        _PROCESS_JOBS[job_id] = job_state
+
+    worker = threading.Thread(
+        target=_run_processing_job,
+        args=(
+            job_id,
+            temp_path,
+            year,
+            ticker,
+            sort_by,
+            output_format,
+            len(files),
+            _should_use_e2e_demo(files),
+        ),
+        daemon=True,
+    )
+    worker.start()
+
+    return JSONResponse(content={"job_id": job_id})
+
+
+@app.get("/api/process/status/{job_id}")
+def get_process_status(job_id: str):
+    job = _get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job não encontrado.")
+
+    total_files = int(job.get("total_files") or 0)
+    processed_files = int(job.get("processed_files") or 0)
+    progress_percent = (
+        min(100, max(0, round((processed_files / total_files) * 100))) if total_files > 0 else 0
+    )
+
+    return JSONResponse(
+        content={
+            "job_id": job_id,
+            "status": job.get("status"),
+            "message": job.get("message"),
+            "current_file": job.get("current_file"),
+            "processed_files": processed_files,
+            "total_files": total_files,
+            "progress_percent": progress_percent,
+            "result": job.get("result"),
+            "error": job.get("error"),
+        }
+    )
 
 
 @app.get("/api/download/{filename}")

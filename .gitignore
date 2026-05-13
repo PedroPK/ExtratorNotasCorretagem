@@ -69,3 +69,6 @@ Thumbs.db
 # Editor files
 *.sublime-project
 *.sublime-workspace
+
+# Test Files
+.coverage
