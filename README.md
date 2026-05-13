@@ -30,7 +30,24 @@ Com esses dados extraidos, posso alimentar a planilha de controle original.
 - **Log detalhado** com arquivo persistente
 - **Exportação em múltiplos formatos** (CSV, Excel, JSON)
 - **CLI moderno** com argumentos de linha de comando
+- **Frontend web com drag and drop** para PDFs e ZIPs
 - **Estrutura organizada** com configurações em `resouces/`
+
+## 🌐 Frontend Web
+
+Agora a aplicação também pode ser usada pelo navegador. O usuário faz upload de PDFs ou ZIPs,
+acompanha o processamento e, ao final, pode baixar o arquivo exportado ou visualizar os dados
+extraídos diretamente na tela.
+
+```bash
+# Instale as dependências adicionais, se necessário
+pip install -r resouces/requirements.txt
+
+# Inicie a interface web
+python3 src/webapp.py
+```
+
+Depois, abra `http://localhost:8000`.
 
 ## ✨ Filtro de Ano 🎯
 
