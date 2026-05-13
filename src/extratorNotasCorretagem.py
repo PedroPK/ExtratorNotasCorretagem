@@ -883,6 +883,7 @@ def analisar_pasta_ou_zip(
     year_filter: Optional[int] = None,
     sort_by: str = "name",
     progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+    should_stop: Optional[Callable[[], bool]] = None,
 ):
     todos_dados = []
     arquivos_processados = 0
@@ -1016,7 +1017,14 @@ def analisar_pasta_ou_zip(
 
         try:
             for tarefa in tarefas:
-                if stop_processing:
+                graceful_stop_requested = stop_processing
+                if not graceful_stop_requested and should_stop is not None:
+                    try:
+                        graceful_stop_requested = bool(should_stop())
+                    except Exception:
+                        graceful_stop_requested = False
+
+                if graceful_stop_requested:
                     logger.warning(
                         "⏸️ Interrupção detectada — finalizando processamento após o arquivo atual."
                     )

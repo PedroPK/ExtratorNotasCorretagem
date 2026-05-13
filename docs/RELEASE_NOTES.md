@@ -4,6 +4,37 @@ Este arquivo concentra as notas de correções e histórico de versões do proje
 
 ## 🔧 Correções Recentes
 
+### v1.4.0 (13/05/2026) - Barra de Progresso por Arquivo na Interface Web
+
+**Objetivo:** Dar feedback visual em tempo real durante o processamento, eliminando a percepção de travamento em lotes grandes de PDFs.
+
+**Novidades:**
+- ✅ Barra de progresso gradiente (azul → verde) atualizada arquivo a arquivo
+- ✅ Contador de arquivos: "X / Y arquivos" e percentual concluído
+- ✅ Nome do arquivo em processamento exibido no painel de status (com quebra de linha)
+- ✅ Processamento convertido para modelo assíncrono com job em background
+- ✅ Frontend realiza polling leve (700 ms) em `/api/process/status/{job_id}`
+- ✅ Endpoint síncrono `/api/process` preservado para compatibilidade
+- ✅ Callback `progress_callback` opcional adicionado a `analisar_pasta_ou_zip()`
+- ✅ Marcador `e2e` registrado no `pytest.ini` (corrige falha com `--strict-markers`)
+
+**Novos endpoints:**
+- `POST /api/process/start` — inicia job assíncrono, retorna `job_id`
+- `GET /api/process/status/{job_id}` — retorna status, progresso e arquivo atual
+
+**Arquivos impactados:**
+- `src/webapp.py`
+- `src/extratorNotasCorretagem.py`
+- `pytest.ini`
+- `docs/QUICKSTART.md`
+- `docs/RELEASE_NOTES.md`
+
+**Impacto:**
+- Sem quebra de compatibilidade com CLI nem com testes existentes
+- Mocks de `analisar_pasta_ou_zip` sem `progress_callback` continuam funcionando (fallback por `TypeError`)
+
+---
+
 ### v1.3.0 (13/05/2026) - Frontend Web Documentado + Prints Automatizados (Playwright)
 
 **Objetivo:** Consolidar a documentação da nova interface gráfica web e padronizar a captura de screenshots via teste E2E.
@@ -429,6 +460,7 @@ Outros exemplos corrigidos anteriormente: ELETROBRAS (ON→ELET3 vs PNB→ELET4)
 
 | Versão | Data | Mudança Principal |
 |--------|------|---|
+| 1.4.0 | 13/05/2026 | Barra de progresso por arquivo na interface web |
 | 1.1.7 | 20/02/2026 | Formatação decimal com vírgula (padrão brasileiro) |
 | 1.1.6 | 20/02/2026 | Prioridade correta em mapeamento de tickers |
 | 1.1.5 | 20/02/2026 | Adição de mappings para KLABIN UNT |

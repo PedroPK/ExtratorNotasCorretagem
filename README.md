@@ -59,6 +59,10 @@ Depois, abra `http://localhost:8000`.
 
 ![Upload com arquivo selecionado](docs/img/webapp_upload_selected.png)
 
+#### Processamento em andamento com barra de progresso
+
+![Barra de progresso durante o processamento](docs/img/webapp_progress.png)
+
 #### Preview dos dados extraídos e do arquivo pronto para download
 
 ![Preview dos dados extraídos](docs/img/webapp_preview_download.png)

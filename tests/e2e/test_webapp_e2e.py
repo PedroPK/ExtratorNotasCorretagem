@@ -106,6 +106,12 @@ def test_webapp_e2e():
 
             # Processa e aguarda o preview
             page.click("#process-button")
+            page.wait_for_function(
+                "() => document.getElementById('status-message')?.textContent?.includes('Processando arquivo:')",
+                timeout=15000,
+            )
+            page.locator("#progress-wrap").scroll_into_view_if_needed()
+            page.screenshot(path=str(IMG_DIR / "webapp_progress.png"), full_page=True)
             page.wait_for_selector("#results:not(.hidden)", timeout=15000)
             page.wait_for_selector("#preview-table tbody tr", timeout=15000)
             page.locator("#results").scroll_into_view_if_needed()

@@ -8,6 +8,7 @@ import os
 import shutil
 import tempfile
 import threading
+import time
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -191,18 +192,6 @@ HTML_PAGE = """<!doctype html>
       height: 100%;
       background: linear-gradient(90deg, #38bdf8 0%, #34d399 100%);
       transition: width 240ms ease;
-    }
-
-    .current-file {
-      font-size: 0.86rem;
-      color: #cbe7ff;
-      background: rgba(125, 211, 252, 0.08);
-      border: 1px solid rgba(125, 211, 252, 0.18);
-      border-radius: 10px;
-      padding: 8px 10px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
     }
 
     .status-pill {
@@ -410,7 +399,6 @@ HTML_PAGE = """<!doctype html>
             <div class="progress-track">
               <div id="progress-bar" class="progress-bar"></div>
             </div>
-            <div id="current-file" class="current-file hidden"></div>
           </div>
           <div id="status-message" class="message">Selecione os arquivos e clique em processar.</div>
           <div id="download-slot" class="hidden"></div>
@@ -458,6 +446,7 @@ HTML_PAGE = """<!doctype html>
         <div class="actions">
           <button id="clear-button" class="secondary" type="button">Limpar seleção</button>
           <button id="scroll-button" class="secondary" type="button">Ver preview</button>
+          <button id="cancel-button" class="secondary hidden" type="button">Interromper processamento</button>
         </div>
       </form>
     </section>
@@ -493,6 +482,7 @@ HTML_PAGE = """<!doctype html>
     const processButton = document.getElementById('process-button');
     const clearButton = document.getElementById('clear-button');
     const scrollButton = document.getElementById('scroll-button');
+    const cancelButton = document.getElementById('cancel-button');
     const results = document.getElementById('results');
     const downloadSlot = document.getElementById('download-slot');
     const tableMessage = document.getElementById('table-message');
@@ -503,7 +493,8 @@ HTML_PAGE = """<!doctype html>
     const progressCount = document.getElementById('progress-count');
     const progressPercent = document.getElementById('progress-percent');
     const progressBar = document.getElementById('progress-bar');
-    const currentFile = document.getElementById('current-file');
+    let activeJobId = null;
+    let cancellationRequested = false;
 
     const metrics = {
       records: document.getElementById('metric-records'),
@@ -523,8 +514,6 @@ HTML_PAGE = """<!doctype html>
       progressCount.textContent = '0 / 0 arquivos';
       progressPercent.textContent = '0%';
       progressBar.style.width = '0%';
-      currentFile.classList.add('hidden');
-      currentFile.textContent = '';
     }
 
     function updateProgress(processed, total, fileName = '') {
@@ -539,14 +528,6 @@ HTML_PAGE = """<!doctype html>
       progressCount.textContent = `${safeProcessed} / ${total} arquivos`;
       progressPercent.textContent = `${percent}%`;
       progressBar.style.width = `${percent}%`;
-
-      if (fileName) {
-        currentFile.textContent = `Processando agora: ${fileName}`;
-        currentFile.classList.remove('hidden');
-      } else {
-        currentFile.classList.add('hidden');
-        currentFile.textContent = '';
-      }
     }
 
     function refreshFileCount() {
@@ -629,7 +610,21 @@ HTML_PAGE = """<!doctype html>
       clearButton.disabled = loading;
       scrollButton.disabled = loading;
       fileInput.disabled = loading;
+      cancelButton.classList.toggle('hidden', !loading);
+      cancelButton.disabled = !loading || cancellationRequested;
       queueState.textContent = loading ? 'Processando...' : 'Pronto';
+    }
+
+    async function requestCancel(jobId) {
+      const response = await fetch(`/api/process/cancel/${jobId}`, {
+        method: 'POST',
+      });
+
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.detail || payload.message || 'Não foi possível solicitar o cancelamento.');
+      }
+      return payload;
     }
 
     async function startProcessing(formData) {
@@ -659,8 +654,16 @@ HTML_PAGE = """<!doctype html>
           setStatus('Processando', payload.message || 'Extraindo dados dos arquivos...', 'Em andamento');
         }
 
+        if (payload.status === 'cancelling') {
+          setStatus('Cancelando', payload.message || 'Finalizando arquivo atual...', 'Cancelando...');
+        }
+
         if (payload.status === 'completed') {
-          return payload.result;
+          return payload;
+        }
+
+        if (payload.status === 'cancelled') {
+          return payload;
         }
 
         if (payload.status === 'failed') {
@@ -710,6 +713,24 @@ HTML_PAGE = """<!doctype html>
       results.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
 
+    cancelButton.addEventListener('click', async () => {
+      if (!activeJobId || cancellationRequested) {
+        return;
+      }
+
+      cancellationRequested = true;
+      cancelButton.disabled = true;
+      setStatus('Cancelando', 'Solicitação enviada. Finalizando arquivo atual...', 'Cancelando...');
+
+      try {
+        await requestCancel(activeJobId);
+      } catch (error) {
+        cancellationRequested = false;
+        cancelButton.disabled = false;
+        setStatus('Erro', error.message, 'Falha');
+      }
+    });
+
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
       const files = fileInput.files;
@@ -738,23 +759,37 @@ HTML_PAGE = """<!doctype html>
 
       try {
         const started = await startProcessing(formData);
-        const payload = await pollJobUntilFinished(started.job_id);
+        activeJobId = started.job_id;
+        cancellationRequested = false;
 
-        updateProgress(payload.files_received || 0, payload.files_received || 0, '');
+        const responsePayload = await pollJobUntilFinished(started.job_id);
+        const payload = responsePayload.result || {};
 
-        results.classList.remove('hidden');
-        metrics.records.textContent = String(payload.records_extracted || 0);
-        metrics.files.textContent = String(payload.files_received || 0);
-        metrics.format.textContent = String(payload.export_format || '-').toUpperCase();
-        metrics.file.textContent = payload.filename || '-';
+        if (responsePayload.status === 'cancelled') {
+          setStatus('Interrompido', responsePayload.message || 'Processamento interrompido pelo usuário.', 'Interrompido');
+        }
 
-        renderPreview(payload);
-        renderDownload(payload);
+        if (responsePayload.status === 'completed') {
+          updateProgress(payload.files_received || 0, payload.files_received || 0, '');
+        }
 
-        const message = payload.message || 'Processamento concluído.';
-        setStatus('Concluído', message, 'Finalizado');
-        if (payload.preview_rows && payload.preview_rows.length) {
-          results.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        if (payload && Object.keys(payload).length) {
+          results.classList.remove('hidden');
+          metrics.records.textContent = String(payload.records_extracted || 0);
+          metrics.files.textContent = String(payload.files_received || 0);
+          metrics.format.textContent = String(payload.export_format || '-').toUpperCase();
+          metrics.file.textContent = payload.filename || '-';
+
+          renderPreview(payload);
+          renderDownload(payload);
+        }
+
+        if (responsePayload.status === 'completed') {
+          const message = payload.message || 'Processamento concluído.';
+          setStatus('Concluído', message, 'Finalizado');
+          if (payload.preview_rows && payload.preview_rows.length) {
+            results.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }
         }
       } catch (error) {
         resetProgress();
@@ -763,6 +798,8 @@ HTML_PAGE = """<!doctype html>
         tableMessage.classList.remove('hidden');
         results.classList.remove('hidden');
       } finally {
+        activeJobId = null;
+        cancellationRequested = false;
         setLoading(false);
       }
     });
@@ -791,6 +828,13 @@ def _get_job(job_id: str) -> Optional[Dict[str, Any]]:
   return snapshot
 
 
+def _job_cancel_requested(job_id: str) -> bool:
+  job = _get_job(job_id)
+  if not job:
+    return False
+  return bool(job.get("cancel_requested"))
+
+
 def _build_processing_result(
   temp_path: Path,
   year: Optional[int],
@@ -800,6 +844,7 @@ def _build_processing_result(
   files_received: int,
   e2e_demo: bool,
   progress_callback=None,
+  should_stop=None,
 ) -> Dict[str, Any]:
   before = _snapshot_output_files()
   if e2e_demo:
@@ -813,6 +858,17 @@ def _build_processing_result(
           "total_files": files_received,
         }
       )
+      time.sleep(0.9)
+      progress_callback(
+        {
+          "stage": "processing",
+          "current_file": "e2e_sample.pdf",
+          "processed_files": 0,
+          "failed_files": 0,
+          "total_files": files_received,
+        }
+      )
+      time.sleep(0.9)
       progress_callback(
         {
           "stage": "processed",
@@ -839,9 +895,10 @@ def _build_processing_result(
         year_filter=year,
         sort_by=sort_by,
         progress_callback=progress_callback,
+        should_stop=should_stop,
       )
     except TypeError:
-      # Compatibilidade com versões/mocks sem parâmetro progress_callback.
+      # Compatibilidade com versões/mocks sem parâmetro progress_callback/should_stop.
       df = analisar_pasta_ou_zip(
         str(temp_path),
         year_filter=year,
@@ -893,6 +950,14 @@ def _run_processing_job(
   e2e_demo: bool,
 ) -> None:
   def on_progress(progress: Dict[str, Any]) -> None:
+    if _job_cancel_requested(job_id):
+      _update_job(
+        job_id,
+        status="cancelling",
+        message="Cancelamento solicitado. Finalizando arquivo atual...",
+      )
+      return
+
     total_files = int(progress.get("total_files") or 0)
     processed_files = int(progress.get("processed_files") or 0)
     current_file = str(progress.get("current_file") or "")
@@ -926,7 +991,19 @@ def _run_processing_job(
       files_received=files_received,
       e2e_demo=e2e_demo,
       progress_callback=on_progress,
+      should_stop=lambda: _job_cancel_requested(job_id),
     )
+
+    if _job_cancel_requested(job_id):
+      _update_job(
+        job_id,
+        status="cancelled",
+        message="Processamento interrompido pelo usuário.",
+        current_file="",
+        result=result,
+      )
+      return
+
     _update_job(
       job_id,
       status="completed",
@@ -1053,6 +1130,7 @@ async def start_process_job(
         "job_id": job_id,
         "status": "queued",
         "message": "Fila criada. Processamento será iniciado.",
+      "cancel_requested": False,
         "current_file": "",
         "processed_files": 0,
         "total_files": len(files),
@@ -1104,6 +1182,38 @@ def get_process_status(job_id: str):
             "progress_percent": progress_percent,
             "result": job.get("result"),
             "error": job.get("error"),
+        }
+    )
+
+
+@app.post("/api/process/cancel/{job_id}")
+def cancel_process_job(job_id: str):
+    job = _get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job não encontrado.")
+
+    status = str(job.get("status") or "")
+    if status in {"completed", "failed", "cancelled"}:
+        return JSONResponse(
+            content={
+                "job_id": job_id,
+                "status": status,
+                "message": job.get("message") or "Job já finalizado.",
+            }
+        )
+
+    _update_job(
+        job_id,
+        cancel_requested=True,
+        status="cancelling",
+        message="Cancelamento solicitado. Finalizando arquivo atual...",
+    )
+
+    return JSONResponse(
+        content={
+            "job_id": job_id,
+            "status": "cancelling",
+            "message": "Cancelamento solicitado. Finalizando arquivo atual...",
         }
     )
 

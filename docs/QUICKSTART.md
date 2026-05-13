@@ -105,7 +105,41 @@ python3 src/extratorNotasCorretagem.py --help
 - Dados: `resouces/output/dados_extraidos_*.csv` (ou `xlsx/json`)
 - Logs: `resouces/output/logs/extracao_*.log`
 
-## 6.1) Frontend Web + prints com Playwright
+## 6.1) Testes automatizados
+
+### Suite completa (unit + integração + cobertura)
+
+```bash
+bash scripts/run_tests.sh
+```
+
+Equivalente manual com cobertura:
+
+```bash
+pytest tests/ -v --cov=src --cov-report=term-missing --cov-report=html
+```
+
+O relatório HTML de cobertura é gerado em `htmlcov/index.html`.
+
+### Apenas testes unitários e de integração (sem E2E)
+
+```bash
+pytest tests/ -v --ignore=tests/e2e
+```
+
+### Testes E2E com Playwright (interface web)
+
+```bash
+# 1) Inicie a aplicação em um terminal
+python3 src/webapp.py
+
+# 2) Em outro terminal, execute o teste E2E
+python3 tests/e2e/test_webapp_e2e.py
+```
+
+> O E2E sobe o servidor automaticamente na porta 8010, captura prints e os salva em `docs/img/`.
+
+## 6.2) Frontend Web + prints com Playwright
 
 ### Executar interface web
 
@@ -113,7 +147,7 @@ python3 src/extratorNotasCorretagem.py --help
 python3 src/webapp.py
 ```
 
-Abra `http://localhost:8000` no navegador.
+Abra `http://localhost:8000` no navegador. Durante o processamento, uma **barra de progresso** exibe o percentual concluído e o nome do arquivo em processamento no momento.
 
 ### Gerar prints automaticamente (E2E)
 
@@ -131,6 +165,7 @@ O script salva os prints em `docs/img/`:
 - `webapp_upload_selected.png`
 - `webapp_preview.png`
 - `webapp_download.png`
+- `webapp_progress.png` *(barra de progresso durante extração)*
 
 ## 7) Troubleshooting rápido
 
