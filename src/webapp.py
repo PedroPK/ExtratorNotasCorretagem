@@ -9,6 +9,7 @@ import tempfile
 from pathlib import Path
 from typing import List, Optional
 
+import pandas as pd
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
@@ -662,6 +663,26 @@ def _find_latest_export(before: set[str]) -> Optional[Path]:
     return max(candidates, key=lambda path: path.stat().st_mtime)
 
 
+def _should_use_e2e_demo(files: List[UploadFile]) -> bool:
+    """Habilita dados fixos apenas em execução E2E quando explicitamente solicitado."""
+    if os.getenv("WEBAPP_E2E_DEMO") != "1":
+        return False
+    return any((upload.filename or "").lower() == "e2e_sample.pdf" for upload in files)
+
+
+def _build_e2e_demo_dataframe() -> pd.DataFrame:
+    """Gera dados determinísticos para screenshots E2E com preview e download."""
+    return pd.DataFrame(
+        {
+            "Data": ["10/05/2026", "11/05/2026", "12/05/2026", "13/05/2026"],
+            "Ticker": ["VALE3", "PETR4", "PSSA3", "ITSA4"],
+            "Operação": ["C", "V", "C", "C"],
+            "Quantidade": [10, 5, 30, 12],
+            "Preço": ["58.42", "37.10", "28.33", "11.90"],
+        }
+    )
+
+
 async def _persist_uploads(files: List[UploadFile], destination: Path) -> None:
     for upload in files:
         file_name = os.path.basename(upload.filename or "arquivo_enviado")
@@ -691,12 +712,15 @@ async def process_files(
         await _persist_uploads(files, temp_path)
 
         before = _snapshot_output_files()
-        df = await run_in_threadpool(
-            analisar_pasta_ou_zip,
-            str(temp_path),
-            year_filter=year,
-            sort_by=sort_by,
-        )
+        if _should_use_e2e_demo(files):
+            df = _build_e2e_demo_dataframe()
+        else:
+            df = await run_in_threadpool(
+                analisar_pasta_ou_zip,
+                str(temp_path),
+                year_filter=year,
+                sort_by=sort_by,
+            )
         df = _filter_dataframe_by_ticker(df, ticker)
 
         if df.empty:
@@ -756,6 +780,13 @@ def download_file(filename: str):
 
 
 if __name__ == "__main__":
+    import argparse
+
     import uvicorn
 
-    uvicorn.run("webapp:app", host="0.0.0.0", port=8000, reload=False)
+    parser = argparse.ArgumentParser(description="Executa o frontend web do extrator.")
+    parser.add_argument("--host", default="0.0.0.0", help="Host de bind do servidor web.")
+    parser.add_argument("--port", type=int, default=8000, help="Porta do servidor web.")
+    args = parser.parse_args()
+
+    uvicorn.run(app, host=args.host, port=args.port, reload=False)

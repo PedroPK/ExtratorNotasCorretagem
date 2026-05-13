@@ -49,6 +49,32 @@ python3 src/webapp.py
 
 Depois, abra `http://localhost:8000`.
 
+### 🖼️ Interface Web (prints)
+
+#### Tela inicial (drag and drop)
+
+![Tela inicial do frontend web](docs/img/webapp_upload.png)
+
+#### Arquivo selecionado para upload
+
+![Upload com arquivo selecionado](docs/img/webapp_upload_selected.png)
+
+#### Preview dos dados extraídos e do arquivo pronto para download
+
+![Preview dos dados extraídos](docs/img/webapp_preview_download.png)
+
+#### Captura automática dos prints com Playwright
+
+```bash
+# 1) Em um terminal, inicie a aplicação web
+python3 src/webapp.py
+
+# 2) Em outro terminal, execute o teste E2E
+python3 tests/e2e/test_webapp_e2e.py
+```
+
+As imagens são salvas automaticamente em `docs/img/`.
+
 ## ✨ Filtro de Ano 🎯
 
 Agora você pode processar seletivamente apenas PDFs de um ano específico!

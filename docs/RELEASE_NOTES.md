@@ -4,6 +4,43 @@ Este arquivo concentra as notas de correções e histórico de versões do proje
 
 ## 🔧 Correções Recentes
 
+### v1.3.0 (13/05/2026) - Frontend Web Documentado + Prints Automatizados (Playwright)
+
+**Objetivo:** Consolidar a documentação da nova interface gráfica web e padronizar a captura de screenshots via teste E2E.
+
+**Novidades:**
+- ✅ README atualizado com seção visual da interface web
+- ✅ Inclusão de prints reais da UI (upload, seleção de arquivo e preview)
+- ✅ Quick Start atualizado com fluxo de execução da interface web
+- ✅ Quick Start atualizado com comando de captura automática de prints via Playwright
+- ✅ Registro de localização padrão das imagens em `docs/img/`
+
+**Capturas adicionadas:**
+- `docs/img/webapp_upload.png`
+- `docs/img/webapp_upload_selected.png`
+- `docs/img/webapp_preview.png`
+- `docs/img/webapp_download.png`
+
+**Automação E2E adicionada:**
+- `tests/e2e/test_webapp_e2e.py`
+
+**Comandos de referência:**
+```bash
+# Iniciar frontend web
+python3 src/webapp.py
+
+# Gerar prints automaticamente
+python3 tests/e2e/test_webapp_e2e.py
+```
+
+**Arquivos impactados:**
+- `README.md`
+- `docs/QUICKSTART.md`
+- `docs/RELEASE_NOTES.md`
+- `tests/e2e/test_webapp_e2e.py`
+
+---
+
 ### v1.2.3 (18/04/2026) - Correção: Operações Idênticas na Mesma Nota Perdidas
 
 **Problema reportado:** Notas de corretagem com 2 lançamentos idênticos (mesmo ticker,

@@ -105,6 +105,33 @@ python3 src/extratorNotasCorretagem.py --help
 - Dados: `resouces/output/dados_extraidos_*.csv` (ou `xlsx/json`)
 - Logs: `resouces/output/logs/extracao_*.log`
 
+## 6.1) Frontend Web + prints com Playwright
+
+### Executar interface web
+
+```bash
+python3 src/webapp.py
+```
+
+Abra `http://localhost:8000` no navegador.
+
+### Gerar prints automaticamente (E2E)
+
+```bash
+# Se necessário, instale browsers do Playwright
+python3 -m playwright install chromium firefox
+
+# Execute o teste E2E de captura
+python3 tests/e2e/test_webapp_e2e.py
+```
+
+O script salva os prints em `docs/img/`:
+
+- `webapp_upload.png`
+- `webapp_upload_selected.png`
+- `webapp_preview.png`
+- `webapp_download.png`
+
 ## 7) Troubleshooting rápido
 
 ### Erro de dependência (`ModuleNotFoundError`)
