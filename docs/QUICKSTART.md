@@ -147,7 +147,12 @@ python3 tests/e2e/test_webapp_e2e.py
 python3 src/webapp.py
 ```
 
-Abra `http://localhost:8000` no navegador. Durante o processamento, uma **barra de progresso** exibe o percentual concluído e o nome do arquivo em processamento no momento.
+A URL `http://localhost:8000` é aberta automaticamente no navegador. Para desabilitar,
+execute com `--no-open-browser`.
+
+Durante o processamento, uma **barra de progresso** exibe o percentual concluído e o nome
+do arquivo em processamento no momento. Ao finalizar o uso, clique em **Encerrar aplicação**
+na interface para desligar o servidor e liberar recursos computacionais.
 
 ### Gerar prints automaticamente (E2E)
 
@@ -186,6 +191,11 @@ mkdir -p resouces/inputNotasCorretagem
 
 - Verifique senha do PDF em `application.properties`
 - Ajuste `logging.level=DEBUG` e revise os logs em `resouces/output/logs/`
+
+### Encerramento via botão retorna exit code 143
+
+- Comportamento esperado ao usar **Encerrar aplicação** na interface web.
+- O servidor é finalizado com `SIGTERM` para liberar recursos de forma controlada.
 
 ## Leituras relacionadas
 

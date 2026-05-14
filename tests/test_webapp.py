@@ -47,6 +47,14 @@ def test_index_returns_html(client):
 
     assert response.status_code == 200
     assert "Drag and drop" in response.text
+    assert "Encerrar aplicação" in response.text
+
+
+def test_shutdown_endpoint_is_forbidden_when_not_enabled(client):
+    response = client.post("/api/system/shutdown")
+
+    assert response.status_code == 403
+    assert "Encerramento remoto" in response.json()["detail"]
 
 
 def test_process_endpoint_returns_preview_and_download(client):

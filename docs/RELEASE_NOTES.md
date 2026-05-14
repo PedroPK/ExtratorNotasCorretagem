@@ -4,6 +4,35 @@ Este arquivo concentra as notas de correções e histórico de versões do proje
 
 ## 🔧 Correções Recentes
 
+### v1.4.1 (14/05/2026) - Autoabertura do Frontend + Encerramento pela Interface
+
+**Objetivo:** Melhorar a experiência de uso da interface web, automatizando a abertura da URL e oferecendo encerramento rápido do servidor para liberar recursos da máquina.
+
+**Novidades:**
+- ✅ Autoabertura do navegador ao executar `python3 src/webapp.py`
+- ✅ Novas flags de execução do webapp:
+   - `--open-browser` força abertura automática
+   - `--no-open-browser` desabilita abertura automática
+   - `--browser-delay` define atraso (segundos) antes de abrir
+- ✅ Novo botão **Encerrar aplicação** na interface web
+- ✅ Novo endpoint `POST /api/system/shutdown` para desligamento gracioso do processo
+- ✅ Proteção para desligamento remoto: shutdown só habilitado quando app sobe via CLI local
+- ✅ Cobertura de teste adicionada para botão na tela e bloqueio do endpoint quando desabilitado
+
+**Arquivos impactados:**
+- `src/webapp.py`
+- `tests/test_webapp.py`
+- `README.md`
+- `docs/QUICKSTART.md`
+- `docs/RELEASE_NOTES.md`
+
+**Impacto:**
+- Fluxo web mais simples (menos passos manuais)
+- Encerramento controlado para evitar servidor ocioso em execução
+- Compatibilidade preservada com E2E (abertura automática desabilitada por padrão quando `WEBAPP_E2E_DEMO=1`)
+
+---
+
 ### v1.4.0 (13/05/2026) - Barra de Progresso por Arquivo na Interface Web
 
 **Objetivo:** Dar feedback visual em tempo real durante o processamento, eliminando a percepção de travamento em lotes grandes de PDFs.

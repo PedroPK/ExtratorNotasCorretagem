@@ -5,11 +5,13 @@ from __future__ import annotations
 
 import mimetypes
 import os
+import signal
 import shutil
 import tempfile
 import threading
 import time
 import uuid
+import webbrowser
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -37,6 +39,34 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 _JOBS_LOCK = threading.Lock()
 _PROCESS_JOBS: Dict[str, Dict[str, Any]] = {}
+
+# Segurança: endpoint de desligamento só fica disponível quando o app é iniciado via CLI.
+app.state.allow_shutdown = False
+
+
+def _schedule_browser_open(url: str, delay_seconds: float = 1.0) -> None:
+  """Agenda abertura do navegador sem bloquear a subida do servidor."""
+
+  def _open() -> None:
+    try:
+      webbrowser.open(url, new=2, autoraise=True)
+    except Exception as exc:  # pragma: no cover - comportamento depende do SO/ambiente.
+      print(f"Aviso: não foi possível abrir o navegador automaticamente ({exc}).")
+
+  timer = threading.Timer(max(delay_seconds, 0.0), _open)
+  timer.daemon = True
+  timer.start()
+
+
+def _schedule_server_shutdown(delay_seconds: float = 0.8) -> None:
+  """Agenda o desligamento do processo atual para permitir resposta HTTP antes do encerramento."""
+
+  def _shutdown() -> None:
+    os.kill(os.getpid(), signal.SIGTERM)
+
+  timer = threading.Timer(max(delay_seconds, 0.0), _shutdown)
+  timer.daemon = True
+  timer.start()
 
 
 HTML_PAGE = """<!doctype html>
@@ -475,6 +505,7 @@ HTML_PAGE = """<!doctype html>
         <div class="actions">
           <button id="clear-button" class="secondary" type="button">Limpar seleção</button>
           <button id="scroll-button" class="secondary" type="button">Ver preview</button>
+          <button id="shutdown-button" class="danger" type="button">Encerrar aplicação</button>
         </div>
       </form>
     </section>
@@ -511,6 +542,7 @@ HTML_PAGE = """<!doctype html>
     const clearButton = document.getElementById('clear-button');
     const scrollButton = document.getElementById('scroll-button');
     const cancelButton = document.getElementById('cancel-button');
+    const shutdownButton = document.getElementById('shutdown-button');
     const results = document.getElementById('results');
     const downloadSlot = document.getElementById('download-slot');
     const tableMessage = document.getElementById('table-message');
@@ -749,6 +781,25 @@ HTML_PAGE = """<!doctype html>
       return payload;
     }
 
+    async function shutdownApplication() {
+      const response = await fetch('/api/system/shutdown', {
+        method: 'POST',
+      });
+
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.detail || payload.message || 'Não foi possível encerrar a aplicação.');
+      }
+      return payload;
+    }
+
+    function attemptWindowClose() {
+      setTimeout(() => {
+        window.open('', '_self');
+        window.close();
+      }, 350);
+    }
+
     async function pollJobUntilFinished(jobId) {
       while (true) {
         const response = await fetch(`/api/process/status/${jobId}`);
@@ -836,6 +887,25 @@ HTML_PAGE = """<!doctype html>
       } catch (error) {
         cancellationRequested = false;
         cancelButton.disabled = false;
+        setStatus('Erro', error.message, 'Falha');
+      }
+    });
+
+    shutdownButton.addEventListener('click', async () => {
+      if (activeJobId) {
+        setStatus('Ação bloqueada', 'Aguarde o processamento finalizar antes de encerrar a aplicação.', 'Em andamento');
+        return;
+      }
+
+      shutdownButton.disabled = true;
+      setStatus('Encerrando', 'Liberando recursos e finalizando o servidor...', 'Encerrando...');
+
+      try {
+        await shutdownApplication();
+        setStatus('Encerrando', 'Servidor finalizado. A janela será fechada.', 'Finalizado');
+        attemptWindowClose();
+      } catch (error) {
+        shutdownButton.disabled = false;
         setStatus('Erro', error.message, 'Falha');
       }
     });
@@ -1327,6 +1397,20 @@ def cancel_process_job(job_id: str):
     )
 
 
+@app.post("/api/system/shutdown")
+def shutdown_webapp():
+    if not bool(getattr(app.state, "allow_shutdown", False)):
+        raise HTTPException(status_code=403, detail="Encerramento remoto não está habilitado.")
+
+    _schedule_server_shutdown()
+    return JSONResponse(
+        content={
+            "status": "shutting_down",
+            "message": "Servidor será encerrado em instantes.",
+        }
+    )
+
+
 @app.get("/api/download/{filename}")
 def download_file(filename: str):
     file_path = _safe_output_path(filename)
@@ -1349,6 +1433,32 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Executa o frontend web do extrator.")
     parser.add_argument("--host", default="0.0.0.0", help="Host de bind do servidor web.")
     parser.add_argument("--port", type=int, default=8000, help="Porta do servidor web.")
+    parser.set_defaults(open_browser=os.getenv("WEBAPP_E2E_DEMO") != "1")
+    parser.add_argument(
+      "--open-browser",
+      dest="open_browser",
+      action="store_true",
+      help="Força abertura automática da URL do frontend no navegador.",
+    )
+    parser.add_argument(
+      "--no-open-browser",
+      dest="open_browser",
+      action="store_false",
+      help="Não abre a URL automaticamente no navegador.",
+    )
+    parser.add_argument(
+      "--browser-delay",
+      type=float,
+      default=1.0,
+      help="Atraso (segundos) antes de abrir o navegador automaticamente.",
+    )
     args = parser.parse_args()
+
+    app.state.allow_shutdown = True
+    if args.open_browser:
+      browser_host = args.host
+      if browser_host in {"0.0.0.0", "::"}:
+        browser_host = "127.0.0.1"
+      _schedule_browser_open(f"http://{browser_host}:{args.port}", args.browser_delay)
 
     uvicorn.run(app, host=args.host, port=args.port, reload=False)

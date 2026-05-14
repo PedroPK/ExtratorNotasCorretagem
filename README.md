@@ -47,7 +47,11 @@ pip install -r resouces/requirements.txt
 python3 src/webapp.py
 ```
 
-Depois, abra `http://localhost:8000`.
+A URL `http://localhost:8000` é aberta automaticamente no navegador (padrão).
+Se quiser desabilitar isso, use `python3 src/webapp.py --no-open-browser`.
+
+Na própria tela existe o botão **Encerrar aplicação**, que finaliza o servidor e tenta
+fechar a janela para liberar recursos do computador.
 
 ### 🖼️ Interface Web (prints)
 
