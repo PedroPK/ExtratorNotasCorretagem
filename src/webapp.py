@@ -226,6 +226,12 @@ HTML_PAGE = """<!doctype html>
       align-items: end;
     }
 
+    .process-actions {
+      display: grid;
+      gap: 10px;
+      align-self: end;
+    }
+
     label { display: block; font-size: 0.84rem; color: var(--muted); margin-bottom: 8px; }
     input, select, button {
       width: 100%;
@@ -268,7 +274,7 @@ HTML_PAGE = """<!doctype html>
       flex-wrap: wrap;
     }
 
-    .primary, .secondary {
+    .primary, .secondary, .danger {
       width: auto;
       padding-inline: 20px;
       font-weight: 700;
@@ -287,8 +293,15 @@ HTML_PAGE = """<!doctype html>
       background: rgba(255, 255, 255, 0.03);
     }
 
-    .primary:hover, .secondary:hover { transform: translateY(-1px); }
-    .primary:disabled, .secondary:disabled { cursor: not-allowed; opacity: 0.55; transform: none; }
+    .danger {
+      border: 1px solid rgba(248, 113, 113, 0.55);
+      background: linear-gradient(135deg, rgba(220, 38, 38, 0.92) 0%, rgba(185, 28, 28, 0.92) 100%);
+      color: #ffe9e9;
+      box-shadow: 0 12px 26px rgba(185, 28, 28, 0.30);
+    }
+
+    .primary:hover, .secondary:hover, .danger:hover { transform: translateY(-1px); }
+    .primary:disabled, .secondary:disabled, .danger:disabled { cursor: not-allowed; opacity: 0.55; transform: none; }
 
     .results {
       margin-top: 22px;
@@ -373,7 +386,7 @@ HTML_PAGE = """<!doctype html>
     <section class="hero">
       <div class="card hero-copy">
         <div class="eyebrow">Drag and drop de PDFs e ZIPs</div>
-        <h1>Extraia notas de corretagem com uma interface direta.</h1>
+        <h1>Extrator de Notas de Corretagem</h1>
         <p class="lede">
           Arraste PDFs ou arquivos ZIP, processe no backend existente e receba o resultado na tela
           com opção de download do arquivo exportado. O preview mostra os dados extraídos sem
@@ -440,13 +453,15 @@ HTML_PAGE = """<!doctype html>
               <option value="json">JSON</option>
             </select>
           </div>
-          <button id="process-button" class="primary" type="submit">Processar</button>
+          <div class="process-actions">
+            <button id="process-button" class="primary" type="submit">Processar</button>
+            <button id="cancel-button" class="danger hidden" type="button">Interromper processamento</button>
+          </div>
         </div>
 
         <div class="actions">
           <button id="clear-button" class="secondary" type="button">Limpar seleção</button>
           <button id="scroll-button" class="secondary" type="button">Ver preview</button>
-          <button id="cancel-button" class="secondary hidden" type="button">Interromper processamento</button>
         </div>
       </form>
     </section>
