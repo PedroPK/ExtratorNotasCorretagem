@@ -178,6 +178,14 @@ HTML_PAGE = """<!doctype html>
       font-size: 0.88rem;
     }
 
+    .progress-time {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      color: #c7d7ea;
+      font-size: 0.82rem;
+    }
+
     .progress-track {
       width: 100%;
       height: 10px;
@@ -378,6 +386,7 @@ HTML_PAGE = """<!doctype html>
 
     @media (max-width: 1080px) {
       .hero, .controls, .results-grid { grid-template-columns: 1fr; }
+      .progress-time { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -411,6 +420,10 @@ HTML_PAGE = """<!doctype html>
             </div>
             <div class="progress-track">
               <div id="progress-bar" class="progress-bar"></div>
+            </div>
+            <div class="progress-time">
+              <span id="progress-elapsed">Tempo decorrido: 00:00</span>
+              <span id="progress-eta">Tempo restante estimado: --:--</span>
             </div>
           </div>
           <div id="status-message" class="message">Selecione os arquivos e clique em processar.</div>
@@ -508,8 +521,13 @@ HTML_PAGE = """<!doctype html>
     const progressCount = document.getElementById('progress-count');
     const progressPercent = document.getElementById('progress-percent');
     const progressBar = document.getElementById('progress-bar');
+    const progressElapsed = document.getElementById('progress-elapsed');
+    const progressEta = document.getElementById('progress-eta');
     let activeJobId = null;
     let cancellationRequested = false;
+    let processingStartMs = null;
+    let elapsedTimerId = null;
+    let lastProgressSnapshot = { processed: 0, total: 0 };
 
     const metrics = {
       records: document.getElementById('metric-records'),
@@ -529,6 +547,68 @@ HTML_PAGE = """<!doctype html>
       progressCount.textContent = '0 / 0 arquivos';
       progressPercent.textContent = '0%';
       progressBar.style.width = '0%';
+      progressElapsed.textContent = 'Tempo decorrido: 00:00';
+      progressEta.textContent = 'Tempo restante estimado: --:--';
+      lastProgressSnapshot = { processed: 0, total: 0 };
+    }
+
+    function formatDuration(totalSeconds) {
+      const safeSeconds = Math.max(0, Math.floor(totalSeconds || 0));
+      const hours = Math.floor(safeSeconds / 3600);
+      const minutes = Math.floor((safeSeconds % 3600) / 60);
+      const seconds = safeSeconds % 60;
+
+      const mm = String(minutes).padStart(2, '0');
+      const ss = String(seconds).padStart(2, '0');
+      if (hours > 0) {
+        return `${String(hours).padStart(2, '0')}:${mm}:${ss}`;
+      }
+      return `${mm}:${ss}`;
+    }
+
+    function updateTimeEstimate(processed, total) {
+      if (!processingStartMs) {
+        progressElapsed.textContent = 'Tempo decorrido: 00:00';
+        progressEta.textContent = 'Tempo restante estimado: --:--';
+        return;
+      }
+
+      const elapsedSeconds = Math.max(0, (Date.now() - processingStartMs) / 1000);
+      progressElapsed.textContent = `Tempo decorrido: ${formatDuration(elapsedSeconds)}`;
+
+      const safeTotal = Math.max(0, Number(total) || 0);
+      const safeProcessed = Math.max(0, Number(processed) || 0);
+      if (safeTotal === 0 || safeProcessed <= 0) {
+        progressEta.textContent = 'Tempo restante estimado: --:--';
+        return;
+      }
+
+      if (safeProcessed >= safeTotal) {
+        progressEta.textContent = 'Tempo restante estimado: 00:00';
+        return;
+      }
+
+      const filesPerSecond = safeProcessed / Math.max(elapsedSeconds, 0.001);
+      const remainingFiles = safeTotal - safeProcessed;
+      const etaSeconds = remainingFiles / Math.max(filesPerSecond, 0.001);
+      progressEta.textContent = `Tempo restante estimado: ${formatDuration(etaSeconds)}`;
+    }
+
+    function startElapsedTimer() {
+      if (elapsedTimerId) {
+        clearInterval(elapsedTimerId);
+      }
+      elapsedTimerId = setInterval(() => {
+        updateTimeEstimate(lastProgressSnapshot.processed, lastProgressSnapshot.total);
+      }, 1000);
+    }
+
+    function stopElapsedTimer() {
+      if (!elapsedTimerId) {
+        return;
+      }
+      clearInterval(elapsedTimerId);
+      elapsedTimerId = null;
     }
 
     function updateProgress(processed, total, fileName = '') {
@@ -537,12 +617,18 @@ HTML_PAGE = """<!doctype html>
         return;
       }
 
+      if (!processingStartMs) {
+        processingStartMs = Date.now();
+      }
+
       const safeProcessed = Math.max(0, Math.min(processed, total));
       const percent = Math.round((safeProcessed / total) * 100);
       progressWrap.classList.remove('hidden');
       progressCount.textContent = `${safeProcessed} / ${total} arquivos`;
       progressPercent.textContent = `${percent}%`;
       progressBar.style.width = `${percent}%`;
+      lastProgressSnapshot = { processed: safeProcessed, total };
+      updateTimeEstimate(safeProcessed, total);
     }
 
     function refreshFileCount() {
@@ -628,6 +714,14 @@ HTML_PAGE = """<!doctype html>
       cancelButton.classList.toggle('hidden', !loading);
       cancelButton.disabled = !loading || cancellationRequested;
       queueState.textContent = loading ? 'Processando...' : 'Pronto';
+
+      if (loading) {
+        processingStartMs = Date.now();
+        startElapsedTimer();
+      } else {
+        updateTimeEstimate(lastProgressSnapshot.processed, lastProgressSnapshot.total);
+        stopElapsedTimer();
+      }
     }
 
     async function requestCancel(jobId) {
