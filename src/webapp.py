@@ -133,9 +133,14 @@ def _extract_dividend_rows_from_ocr_text(ocr_text: str, fallback_date: str) -> p
   s_qty_pattern = re.compile(r"S/\s*(\d[\d.,]*)", re.IGNORECASE)
   before_r_pattern = re.compile(r"([\d.,]+)\s+R\$", re.IGNORECASE)
 
+  today_pattern = re.compile(r"^hoje$", re.IGNORECASE)
+
   active_date = _normalize_date(fallback_date)
   if not active_date:
     for line in lines:
+      if today_pattern.match(line):
+        active_date = datetime.now().strftime("%d/%m/%Y")
+        break
       date_match = date_pattern.search(line)
       if date_match:
         active_date = _normalize_date(date_match.group(1))
@@ -145,16 +150,19 @@ def _extract_dividend_rows_from_ocr_text(ocr_text: str, fallback_date: str) -> p
   while i < len(lines):
     line = lines[i]
 
-    date_match = date_pattern.search(line)
-    if date_match:
-      active_date = _normalize_date(date_match.group(1))
+    if today_pattern.match(line):
+      active_date = datetime.now().strftime("%d/%m/%Y")
+    else:
+      date_match = date_pattern.search(line)
+      if date_match:
+        active_date = _normalize_date(date_match.group(1))
 
     if any(word in line.upper() for word in ("DIVID", "REND", "JCP")):
       window = [line]
       j = i + 1
       while j < len(lines) and len(window) < 6:
         next_line = lines[j]
-        if date_pattern.search(next_line):
+        if date_pattern.search(next_line) or today_pattern.match(next_line):
           break
         if any(word in next_line.upper() for word in ("DIVID", "REND", "JCP")):
           break
@@ -267,6 +275,10 @@ def _process_image_content(image_bytes: bytes, payment_date: Optional[str]) -> D
       language_preference=["pt-BR"],
       recognition_level="accurate",
     ).recognize()
+    try:
+      results = sorted(results, key=lambda r: (-(r[2][1] + r[2][3]), r[2][0]))
+    except Exception:
+      pass
     ocr_text = "\n".join(text for text, _conf, _bbox in results)
   except Exception as exc:
     raise HTTPException(status_code=500, detail=f"Falha no OCR da imagem: {exc}") from exc

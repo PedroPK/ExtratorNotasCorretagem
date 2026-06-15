@@ -152,9 +152,17 @@ Para OCR local, a aplicação utiliza `ocrmac` (OCR nativo do macOS), incluído 
 
 - Selecione uma imagem do extrato ou arraste/solte no dropzone
 - Também é possível colar com **Ctrl/Cmd+V**
-- (Opcional) informe a data de recebimento
+- (Opcional) informe a data de recebimento — usada como fallback caso a imagem não contenha data
 - Clique em **Processar imagem**
 - Use **Copiar para Google Sheets** para copiar o texto tabulado
+
+### Detecção automática de datas
+
+A aplicação detecta datas diretamente na imagem OCR (formato `DD/MM/YYYY`). O campo de data no formulário é usado apenas como fallback quando a imagem não contém data legível.
+
+O cabeçalho **"Hoje"** é reconhecido automaticamente: quando presente na imagem, a data de processamento (`datetime.now()`) é usada como data dos registros daquela seção.
+
+Os registros exportados para o Google Sheets são ordenados por data (do mais antigo ao mais recente), independentemente da ordem em que aparecem na imagem.
 
 Ao finalizar o uso, clique em **Encerrar aplicação** na interface para desligar o servidor e liberar recursos computacionais.
 

@@ -4,8 +4,15 @@ Todas as mudanças relevantes deste projeto serão documentadas neste arquivo.
 
 ## [1.5.1] - 2026-06-15
 
+### Added
+- Suporte ao cabeçalho de data "Hoje" nas imagens de extrato: quando detectado, os registros recebem a data atual do processamento automaticamente.
+
 ### Changed
 - TSV gerado no processamento de imagem agora é ordenado pela coluna Data, da mais antiga para a mais recente.
+- Resultados do OCR agora são reordenados por posição (bounding box) antes do parse: topo→base, esquerda→direita. Isso corrige a extração em layouts com duas colunas (descrição à esquerda, valor R$ à direita), onde o Vision framework retorna os elementos fora de ordem de leitura.
+
+### Fixed
+- Corrigido bug onde apenas 1 de N registros era extraído em imagens com coluna de valores R$ separada da coluna de descrições (layout comum em apps de corretoras).
 
 ## [1.5.0] - 2026-06-09
 
