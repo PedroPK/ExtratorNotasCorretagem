@@ -215,6 +215,15 @@ def _build_sheets_payload(df: pd.DataFrame) -> Dict[str, Any]:
       safe_df[column] = ""
   safe_df = safe_df[sheets_columns]
 
+  if not safe_df.empty and "Data" in safe_df.columns:
+    try:
+      safe_df = safe_df.copy()
+      safe_df["_data_dt"] = pd.to_datetime(safe_df["Data"], format="%d/%m/%Y", errors="coerce")
+      safe_df = safe_df.sort_values("_data_dt", ascending=True).drop(columns=["_data_dt"])
+      safe_df = safe_df.reset_index(drop=True)
+    except Exception:
+      pass
+
   preview_rows = safe_df.to_dict(orient="records")
   sheets_lines = ["\t".join(sheets_columns)]
   for row in preview_rows:
