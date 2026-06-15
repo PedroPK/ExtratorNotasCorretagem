@@ -2,6 +2,11 @@
 
 Todas as mudanças relevantes deste projeto serão documentadas neste arquivo.
 
+## [1.5.1] - 2026-06-15
+
+### Changed
+- TSV gerado no processamento de imagem agora é ordenado pela coluna Data, da mais antiga para a mais recente.
+
 ## [1.5.0] - 2026-06-09
 
 ### Added
