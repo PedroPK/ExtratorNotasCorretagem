@@ -4,6 +4,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
+from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
@@ -46,7 +47,7 @@ def test_index_returns_html(client):
     response = client.get("/")
 
     assert response.status_code == 200
-    assert "Drag and drop" in response.text
+    assert "drag and drop" in response.text.lower()
     assert "Encerrar aplicação" in response.text
 
 
@@ -132,3 +133,101 @@ def test_cancel_process_job_returns_final_state_when_already_done(client):
     assert response.status_code == 200
     payload = response.json()
     assert payload["status"] == "completed"
+
+
+def test_process_image_endpoint_rejects_non_image(client):
+    response = client.post(
+        "/api/process-image",
+        files={"file": ("nota.pdf", b"dummy pdf", "application/pdf")},
+    )
+
+    assert response.status_code == 400
+    assert "imagem" in response.json()["detail"].lower()
+
+
+def test_process_image_endpoint_returns_sheets_payload(client, monkeypatch):
+    image = Image.new("RGB", (60, 40), "white")
+    buffer = webapp_module.BytesIO()
+    image.save(buffer, format="PNG")
+
+    fake_results = [
+        ("15/05/2026", 0.99, (0, 0, 1, 1)),
+        ("DIVIDENDO VALE3 100 R$ 34,56", 0.99, (0, 0, 1, 1)),
+    ]
+
+    class FakeOCR:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def recognize(self, *_args, **_kwargs):
+            return fake_results
+
+    monkeypatch.setattr(webapp_module._ocrmac, "OCR", FakeOCR)
+
+    response = client.post(
+        "/api/process-image",
+        files={"file": ("extrato.png", buffer.getvalue(), "image/png")},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["records_extracted"] == 1
+    assert payload["columns"] == ["Data", "Ticker", "Tipo", "Quantidade", "Valor Recebido"]
+    assert payload["preview_rows"][0]["Tipo"] == "D"
+    assert "\t" in payload["sheets_text"]
+
+
+def test_process_image_multiline_ocr(client, monkeypatch):
+    image = Image.new("RGB", (60, 40), "white")
+    buffer = webapp_module.BytesIO()
+    image.save(buffer, format="PNG")
+
+    fake_results = [
+        ("12/06/2026", 0.99, (0, 0, 1, 1)),
+        ("Saldo do dia: R$ 1.228,54", 0.99, (0, 0, 1, 1)),
+        ("RENDIMENTOS DE", 0.99, (0, 0, 1, 1)),
+        ("CLIENTES KNCR11 S/", 0.99, (0, 0, 1, 1)),
+        ("R$ 286,00", 0.99, (0, 0, 1, 1)),
+        ("260", 0.99, (0, 0, 1, 1)),
+        ("08/06/2026", 0.99, (0, 0, 1, 1)),
+        ("RENDIMENTOS DE CLIENTES", 0.99, (0, 0, 1, 1)),
+        ("RZTR11 S/", 0.99, (0, 0, 1, 1)),
+        ("R$ 230,00", 0.99, (0, 0, 1, 1)),
+        ("230", 0.99, (0, 0, 1, 1)),
+        ("RENDIMENTOS DE CLIENTES PORD11 S/", 0.99, (0, 0, 1, 1)),
+        ("R$ 252,35", 0.99, (0, 0, 1, 1)),
+        ("2,575", 0.99, (0, 0, 1, 1)),
+    ]
+
+    class FakeOCR:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def recognize(self, *_args, **_kwargs):
+            return fake_results
+
+    monkeypatch.setattr(webapp_module._ocrmac, "OCR", FakeOCR)
+
+    response = client.post(
+        "/api/process-image",
+        files={"file": ("extrato.png", buffer.getvalue(), "image/png")},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["records_extracted"] == 3
+
+    rows = payload["preview_rows"]
+    assert rows[0]["Data"] == "12/06/2026"
+    assert rows[0]["Ticker"] == "KNCR11"
+    assert rows[0]["Quantidade"] == "260"
+    assert rows[0]["Valor Recebido"] == "286,00"
+
+    assert rows[1]["Data"] == "08/06/2026"
+    assert rows[1]["Ticker"] == "RZTR11"
+    assert rows[1]["Quantidade"] == "230"
+    assert rows[1]["Valor Recebido"] == "230,00"
+
+    assert rows[2]["Ticker"] == "PORD11"
+    assert rows[2]["Quantidade"] == "2575"
+    assert rows[2]["Valor Recebido"] == "252,35"

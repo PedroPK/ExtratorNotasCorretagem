@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import mimetypes
 import os
+import re
 import signal
 import shutil
 import tempfile
@@ -12,13 +13,18 @@ import threading
 import time
 import uuid
 import webbrowser
+from datetime import datetime
+from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
 
 import pandas as pd
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from PIL import Image
+from ocrmac import ocrmac as _ocrmac
 
 from config import get_config
 from extratorNotasCorretagem import (
@@ -69,12 +75,203 @@ def _schedule_server_shutdown(delay_seconds: float = 0.8) -> None:
   timer.start()
 
 
+def _normalize_date(date_text: str) -> str:
+  raw = (date_text or "").strip()
+  if not raw:
+    return ""
+
+  for date_format in ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d", "%d.%m.%Y"):
+    try:
+      return datetime.strptime(raw, date_format).strftime("%d/%m/%Y")
+    except ValueError:
+      continue
+
+  matches = re.search(r"(\d{2})[\/-](\d{2})[\/-](\d{2,4})", raw)
+  if not matches:
+    return raw
+
+  day, month, year = matches.groups()
+  if len(year) == 2:
+    year = f"20{year}"
+  return f"{day}/{month}/{year}"
+
+
+def _normalize_qty(qty_text: str) -> str:
+  digits_only = re.sub(r"[^0-9]", "", (qty_text or "").strip())
+  if not digits_only:
+    return ""
+  return str(int(digits_only))
+
+
+def _normalize_number(value_text: str, decimal_places: int) -> str:
+  cleaned = re.sub(r"[^0-9,.-]", "", (value_text or "").strip())
+  if not cleaned:
+    return ""
+
+  if "," in cleaned and "." in cleaned:
+    if cleaned.rfind(",") > cleaned.rfind("."):
+      cleaned = cleaned.replace(".", "").replace(",", ".")
+    else:
+      cleaned = cleaned.replace(",", "")
+  else:
+    cleaned = cleaned.replace(",", ".")
+
+  try:
+    numeric = float(cleaned)
+  except ValueError:
+    return ""
+  return f"{numeric:.{decimal_places}f}"
+
+
+def _extract_dividend_rows_from_ocr_text(ocr_text: str, fallback_date: str) -> pd.DataFrame:
+  lines = [line.strip() for line in (ocr_text or "").splitlines() if line.strip()]
+  records: List[Dict[str, Any]] = []
+
+  ticker_pattern = re.compile(r"\b([A-Z]{4}\d{1,2})\b")
+  date_pattern = re.compile(r"(\d{2}[\/-]\d{2}[\/-]\d{2,4})")
+  value_pattern = re.compile(r"R\$\s*([\d.,]+)", re.IGNORECASE)
+  s_qty_pattern = re.compile(r"S/\s*(\d[\d.,]*)", re.IGNORECASE)
+  before_r_pattern = re.compile(r"([\d.,]+)\s+R\$", re.IGNORECASE)
+
+  active_date = _normalize_date(fallback_date)
+  if not active_date:
+    for line in lines:
+      date_match = date_pattern.search(line)
+      if date_match:
+        active_date = _normalize_date(date_match.group(1))
+        break
+
+  i = 0
+  while i < len(lines):
+    line = lines[i]
+
+    date_match = date_pattern.search(line)
+    if date_match:
+      active_date = _normalize_date(date_match.group(1))
+
+    if any(word in line.upper() for word in ("DIVID", "REND", "JCP")):
+      window = [line]
+      j = i + 1
+      while j < len(lines) and len(window) < 6:
+        next_line = lines[j]
+        if date_pattern.search(next_line):
+          break
+        if any(word in next_line.upper() for word in ("DIVID", "REND", "JCP")):
+          break
+        window.append(next_line)
+        j += 1
+
+      window_text = " ".join(window)
+
+      ticker_match = ticker_pattern.search(window_text)
+      value_match = value_pattern.search(window_text)
+
+      if ticker_match and value_match:
+        ticker = ticker_match.group(1).upper()
+        value_text = _normalize_number(value_match.group(1), 2).replace(".", ",")
+
+        qty_text = ""
+
+        s_qty_match = s_qty_pattern.search(window_text)
+        if s_qty_match:
+          qty_text = _normalize_qty(s_qty_match.group(1))
+
+        if not qty_text:
+          before_r_match = before_r_pattern.search(window_text)
+          if before_r_match:
+            qty_text = _normalize_qty(before_r_match.group(1))
+
+        if not qty_text:
+          for wline in window:
+            if re.match(r"^[\d.,]+$", wline) and "R$" not in wline.upper():
+              qty_text = _normalize_qty(wline)
+              break
+
+        if qty_text and value_text:
+          records.append(
+            {
+              "Data": active_date or "",
+              "Ticker": ticker,
+              "Tipo": "D",
+              "Quantidade": qty_text,
+              "Valor Recebido": value_text,
+            }
+          )
+
+    i += 1
+
+  if not records:
+    return pd.DataFrame(columns=["Data", "Ticker", "Tipo", "Quantidade", "Valor Recebido"])
+
+  df = pd.DataFrame(records)
+  return df[["Data", "Ticker", "Tipo", "Quantidade", "Valor Recebido"]]
+
+
+def _build_sheets_payload(df: pd.DataFrame) -> Dict[str, Any]:
+  sheets_columns = ["Data", "Ticker", "Tipo", "Quantidade", "Valor Recebido"]
+  safe_df = df.copy() if not df.empty else pd.DataFrame(columns=sheets_columns)
+  for column in sheets_columns:
+    if column not in safe_df.columns:
+      safe_df[column] = ""
+  safe_df = safe_df[sheets_columns]
+
+  preview_rows = safe_df.to_dict(orient="records")
+  sheets_lines = ["\t".join(sheets_columns)]
+  for row in preview_rows:
+    sheets_lines.append("\t".join(str(row.get(column, "")) for column in sheets_columns))
+
+  return {
+    "message": f"Processamento concluído com {len(preview_rows)} registro(s).",
+    "records_extracted": len(preview_rows),
+    "files_received": 1,
+    "export_format": "sheets",
+    "columns": sheets_columns,
+    "preview_rows": preview_rows,
+    "filename": None,
+    "download_url": None,
+    "sheets_text": "\n".join(sheets_lines),
+  }
+
+
+def _build_e2e_demo_image_payload() -> Dict[str, Any]:
+  df = pd.DataFrame(
+    {
+      "Data": ["10/05/2026", "10/05/2026", "11/05/2026"],
+      "Ticker": ["VALE3", "ITSA4", "PSSA3"],
+      "Tipo": ["D", "D", "D"],
+      "Quantidade": ["10", "12", "30"],
+      "Valor Recebido": ["58,42", "11,90", "28,33"],
+    }
+  )
+  return _build_sheets_payload(df)
+
+
+def _process_image_content(image_bytes: bytes, payment_date: Optional[str]) -> Dict[str, Any]:
+  try:
+    image = Image.open(BytesIO(image_bytes))
+  except Exception as exc:
+    raise HTTPException(status_code=400, detail=f"Imagem inválida: {exc}") from exc
+
+  try:
+    results = _ocrmac.OCR(
+      image,
+      language_preference=["pt-BR"],
+      recognition_level="accurate",
+    ).recognize()
+    ocr_text = "\n".join(text for text, _conf, _bbox in results)
+  except Exception as exc:
+    raise HTTPException(status_code=500, detail=f"Falha no OCR da imagem: {exc}") from exc
+
+  df = _extract_dividend_rows_from_ocr_text(ocr_text, payment_date or "")
+  return _build_sheets_payload(df)
+
+
 HTML_PAGE = """<!doctype html>
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Extrator Notas Corretagem</title>
+  <title>Extrator de Dividendos por Imagem</title>
   <style>
     :root {
       --bg: #07111f;
@@ -424,25 +621,25 @@ HTML_PAGE = """<!doctype html>
   <main class="shell">
     <section class="hero">
       <div class="card hero-copy">
-        <div class="eyebrow">Drag and drop de PDFs e ZIPs</div>
-        <h1>Extrator de Notas de Corretagem</h1>
+        <div class="eyebrow">Imagem do extrato de dividendos</div>
+        <h1>Extrator de Dividendos</h1>
         <p class="lede">
-          Arraste PDFs ou arquivos ZIP, processe no backend existente e receba o resultado na tela
-          com opção de download do arquivo exportado. O preview mostra os dados extraídos sem
-          exigir troca de contexto.
+          Selecione, arraste ou cole uma imagem do extrato da conta de investimentos para extrair
+          Data, Ticker, Tipo da Operação, Quantidade de Cotas e Valor Recebido em formato pronto
+          para colar no Google Sheets.
         </p>
 
         <div class="hero-stats">
-          <div class="stat"><strong>PDF + ZIP</strong><span>Entrada única ou múltipla</span></div>
-          <div class="stat"><strong>Preview</strong><span>Dados exibidos no navegador</span></div>
-          <div class="stat"><strong>Download</strong><span>CSV, XLSX ou JSON gerado</span></div>
+          <div class="stat"><strong>Imagem</strong><span>Upload, drag and drop ou Ctrl/Cmd+V</span></div>
+          <div class="stat"><strong>Preview</strong><span>Linhas extraídas para conferência</span></div>
+          <div class="stat"><strong>Copiar</strong><span>Texto tabulado para Google Sheets</span></div>
         </div>
       </div>
 
       <aside class="card status-panel">
         <p class="status-title"><span>Processamento</span><span id="queue-state">Pronto</span></p>
         <div class="status-box">
-          <div class="status-pill"><span class="pulse"></span><span id="status-label">Aguardando arquivos</span></div>
+          <div class="status-pill"><span class="pulse"></span><span id="status-label">Aguardando imagem</span></div>
           <div id="progress-wrap" class="progress-wrap hidden">
             <div class="progress-meta">
               <span id="progress-count">0 / 0 arquivos</span>
@@ -456,7 +653,7 @@ HTML_PAGE = """<!doctype html>
               <span id="progress-eta">Tempo restante estimado: --:--</span>
             </div>
           </div>
-          <div id="status-message" class="message">Selecione os arquivos e clique em processar.</div>
+          <div id="status-message" class="message">Selecione ou cole uma imagem e clique em processar.</div>
           <div id="download-slot" class="hidden"></div>
         </div>
       </aside>
@@ -465,45 +662,25 @@ HTML_PAGE = """<!doctype html>
     <section class="card" style="margin-top: 20px; padding: 24px;">
       <form id="upload-form">
         <div id="dropzone" class="dropzone">
-          <strong>Solte aqui seus PDFs ou ZIPs</strong>
-          <p>Você também pode clicar nesta área para escolher múltiplos arquivos.</p>
-          <div id="file-count" class="file-count">Nenhum arquivo selecionado.</div>
-          <input class="file-input" id="files" name="files" type="file" accept=".pdf,.zip,application/pdf,application/zip" multiple />
+          <strong>Solte aqui uma imagem do extrato</strong>
+          <p>Você também pode clicar para escolher uma imagem ou colar com Ctrl/Cmd+V.</p>
+          <div id="file-count" class="file-count">Nenhuma imagem selecionada.</div>
+          <input class="file-input" id="files" name="files" type="file" accept="image/*" />
         </div>
 
         <div class="controls">
           <div>
-            <label for="year">Ano</label>
-            <input id="year" name="year" type="number" min="1900" max="2100" placeholder="Opcional" />
-          </div>
-          <div>
-            <label for="ticker">Ticker</label>
-            <input id="ticker" name="ticker" type="text" placeholder="Ex.: PSSA3" />
-          </div>
-          <div>
-            <label for="sort-by">Ordenação</label>
-            <select id="sort-by" name="sort_by">
-              <option value="name">Nome</option>
-              <option value="mtime">Data de modificação</option>
-              <option value="ctime">Data de criação</option>
-            </select>
-          </div>
-          <div>
-            <label for="output-format">Saída</label>
-            <select id="output-format" name="output_format">
-              <option value="xlsx">XLSX</option>
-              <option value="csv">CSV</option>
-              <option value="json">JSON</option>
-            </select>
+            <label for="payment-date">Data de recebimento (opcional)</label>
+            <input id="payment-date" name="payment_date" type="text" placeholder="Ex.: 15/05/2026" />
           </div>
           <div class="process-actions">
-            <button id="process-button" class="primary" type="submit">Processar</button>
-            <button id="cancel-button" class="danger hidden" type="button">Interromper processamento</button>
+            <button id="process-button" class="primary" type="submit">Processar imagem</button>
           </div>
         </div>
 
         <div class="actions">
           <button id="clear-button" class="secondary" type="button">Limpar seleção</button>
+          <button id="copy-button" class="primary" type="button">Copiar para Google Sheets</button>
           <button id="scroll-button" class="secondary" type="button">Ver preview</button>
           <button id="shutdown-button" class="danger" type="button">Encerrar aplicação</button>
         </div>
@@ -513,13 +690,14 @@ HTML_PAGE = """<!doctype html>
     <section id="results" class="results hidden">
       <div class="results-grid">
         <div class="result-card"><span>Registros extraídos</span><strong id="metric-records">0</strong></div>
-        <div class="result-card"><span>Arquivos enviados</span><strong id="metric-files">0</strong></div>
+        <div class="result-card"><span>Imagem enviada</span><strong id="metric-files">0</strong></div>
         <div class="result-card"><span>Formato exportado</span><strong id="metric-format">-</strong></div>
         <div class="result-card"><span>Arquivo gerado</span><strong id="metric-file">-</strong></div>
       </div>
 
       <div class="card" style="padding: 18px;">
         <div id="table-message" class="message hidden"></div>
+        <div id="sheets-block" class="message hidden"></div>
         <div class="table-wrap">
           <table id="preview-table">
             <thead></thead>
@@ -541,11 +719,12 @@ HTML_PAGE = """<!doctype html>
     const processButton = document.getElementById('process-button');
     const clearButton = document.getElementById('clear-button');
     const scrollButton = document.getElementById('scroll-button');
-    const cancelButton = document.getElementById('cancel-button');
+    const copyButton = document.getElementById('copy-button');
     const shutdownButton = document.getElementById('shutdown-button');
     const results = document.getElementById('results');
     const downloadSlot = document.getElementById('download-slot');
     const tableMessage = document.getElementById('table-message');
+    const sheetsBlock = document.getElementById('sheets-block');
     const previewTable = document.getElementById('preview-table');
     const previewHead = previewTable.querySelector('thead');
     const previewBody = previewTable.querySelector('tbody');
@@ -556,10 +735,10 @@ HTML_PAGE = """<!doctype html>
     const progressElapsed = document.getElementById('progress-elapsed');
     const progressEta = document.getElementById('progress-eta');
     let activeJobId = null;
-    let cancellationRequested = false;
     let processingStartMs = null;
     let elapsedTimerId = null;
     let lastProgressSnapshot = { processed: 0, total: 0 };
+    let lastSheetsText = '';
 
     const metrics = {
       records: document.getElementById('metric-records'),
@@ -666,8 +845,8 @@ HTML_PAGE = """<!doctype html>
     function refreshFileCount() {
       const files = fileInput.files;
       fileCount.textContent = files && files.length
-        ? `${files.length} arquivo(s) selecionado(s): ${Array.from(files).map((file) => file.name).join(', ')}`
-        : 'Nenhum arquivo selecionado.';
+        ? `${files.length} imagem(ns) selecionada(s): ${Array.from(files).map((file) => file.name).join(', ')}`
+        : 'Nenhuma imagem selecionada.';
     }
 
     function clearPreview() {
@@ -675,6 +854,8 @@ HTML_PAGE = """<!doctype html>
       previewBody.innerHTML = '';
       tableMessage.classList.add('hidden');
       tableMessage.textContent = '';
+      sheetsBlock.classList.add('hidden');
+      sheetsBlock.textContent = '';
       downloadSlot.classList.add('hidden');
       downloadSlot.innerHTML = '';
       results.classList.add('hidden');
@@ -718,33 +899,42 @@ HTML_PAGE = """<!doctype html>
       });
     }
 
-    function renderDownload(payload) {
-      downloadSlot.innerHTML = '';
-      if (!payload.download_url) {
-        downloadSlot.classList.add('hidden');
+    function buildSheetsText(payload) {
+      const rows = payload.preview_rows || [];
+      if (!rows.length) {
+        return '';
+      }
+      const columns = ['Data', 'Ticker', 'Tipo', 'Quantidade', 'Valor Recebido'];
+      const lines = [columns.join('\\t')];
+      rows.forEach((row) => {
+        lines.push(columns.map((column) => {
+          const value = row[column];
+          return value === null || value === undefined ? '' : String(value);
+        }).join('\\t'));
+      });
+      return lines.join('\\n');
+    }
+
+    async function copySheetsText() {
+      if (!lastSheetsText) {
+        setStatus('Sem dados', 'Faça o processamento antes de copiar para o Google Sheets.', 'Atenção');
         return;
       }
 
-      const link = document.createElement('a');
-      link.href = payload.download_url;
-      link.textContent = 'Baixar arquivo processado';
-      link.className = 'primary';
-      link.style.display = 'inline-flex';
-      link.style.textDecoration = 'none';
-      link.style.alignItems = 'center';
-      link.style.justifyContent = 'center';
-      link.style.padding = '14px 20px';
-      downloadSlot.appendChild(link);
-      downloadSlot.classList.remove('hidden');
+      try {
+        await navigator.clipboard.writeText(lastSheetsText);
+        setStatus('Copiado', 'Dados copiados no formato tabulado para colar no Google Sheets.', 'Pronto');
+      } catch (error) {
+        setStatus('Erro', 'Não foi possível copiar automaticamente. Use o texto exibido na tela.', 'Falha');
+      }
     }
 
     function setLoading(loading) {
       processButton.disabled = loading;
       clearButton.disabled = loading;
       scrollButton.disabled = loading;
+      copyButton.disabled = loading;
       fileInput.disabled = loading;
-      cancelButton.classList.toggle('hidden', !loading);
-      cancelButton.disabled = !loading || cancellationRequested;
       queueState.textContent = loading ? 'Processando...' : 'Pronto';
 
       if (loading) {
@@ -756,27 +946,15 @@ HTML_PAGE = """<!doctype html>
       }
     }
 
-    async function requestCancel(jobId) {
-      const response = await fetch(`/api/process/cancel/${jobId}`, {
-        method: 'POST',
-      });
-
-      const payload = await response.json();
-      if (!response.ok) {
-        throw new Error(payload.detail || payload.message || 'Não foi possível solicitar o cancelamento.');
-      }
-      return payload;
-    }
-
-    async function startProcessing(formData) {
-      const response = await fetch('/api/process/start', {
+    async function startProcessingImage(formData) {
+      const response = await fetch('/api/process-image', {
         method: 'POST',
         body: formData,
       });
 
       const payload = await response.json();
       if (!response.ok) {
-        throw new Error(payload.detail || payload.message || 'Falha ao iniciar o processamento.');
+        throw new Error(payload.detail || payload.message || 'Falha ao processar imagem.');
       }
       return payload;
     }
@@ -800,40 +978,6 @@ HTML_PAGE = """<!doctype html>
       }, 350);
     }
 
-    async function pollJobUntilFinished(jobId) {
-      while (true) {
-        const response = await fetch(`/api/process/status/${jobId}`);
-        const payload = await response.json();
-
-        if (!response.ok) {
-          throw new Error(payload.detail || 'Não foi possível consultar o status do processamento.');
-        }
-
-        updateProgress(payload.processed_files || 0, payload.total_files || 0, payload.current_file || '');
-        if (payload.status === 'running') {
-          setStatus('Processando', payload.message || 'Extraindo dados dos arquivos...', 'Em andamento');
-        }
-
-        if (payload.status === 'cancelling') {
-          setStatus('Cancelando', payload.message || 'Finalizando arquivo atual...', 'Cancelando...');
-        }
-
-        if (payload.status === 'completed') {
-          return payload;
-        }
-
-        if (payload.status === 'cancelled') {
-          return payload;
-        }
-
-        if (payload.status === 'failed') {
-          throw new Error(payload.error || 'Falha ao processar arquivos.');
-        }
-
-        await new Promise((resolve) => setTimeout(resolve, 700));
-      }
-    }
-
     fileInput.addEventListener('change', refreshFileCount);
 
     ['dragenter', 'dragover'].forEach((eventName) => {
@@ -851,7 +995,7 @@ HTML_PAGE = """<!doctype html>
     });
 
     dropzone.addEventListener('drop', (event) => {
-      const dropped = Array.from(event.dataTransfer.files || []);
+      const dropped = Array.from(event.dataTransfer.files || []).filter((file) => file.type.startsWith('image/'));
       if (!dropped.length) {
         return;
       }
@@ -862,34 +1006,44 @@ HTML_PAGE = """<!doctype html>
       refreshFileCount();
     });
 
+    document.addEventListener('paste', (event) => {
+      const items = Array.from((event.clipboardData && event.clipboardData.items) || []);
+      const imageItems = items.filter((item) => item.type.startsWith('image/'));
+      if (!imageItems.length) {
+        return;
+      }
+
+      const dataTransfer = new DataTransfer();
+      imageItems.forEach((item, index) => {
+        const file = item.getAsFile();
+        if (!file) {
+          return;
+        }
+        const ext = (file.type.split('/')[1] || 'png').replace(/[^a-z0-9]/gi, '');
+        const safeFile = new File([file], `clipboard_${Date.now()}_${index}.${ext}`, { type: file.type });
+        dataTransfer.items.add(safeFile);
+      });
+
+      if (dataTransfer.files.length > 0) {
+        fileInput.files = dataTransfer.files;
+        refreshFileCount();
+        setStatus('Imagem colada', 'Imagem capturada do clipboard. Clique em processar.', 'Pronto');
+      }
+    });
+
     clearButton.addEventListener('click', () => {
       fileInput.value = '';
       refreshFileCount();
       clearPreview();
-      setStatus('Aguardando arquivos', 'Selecione os arquivos e clique em processar.', 'Pronto');
+      lastSheetsText = '';
+      setStatus('Aguardando imagem', 'Selecione ou cole uma imagem e clique em processar.', 'Pronto');
     });
 
     scrollButton.addEventListener('click', () => {
       results.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
 
-    cancelButton.addEventListener('click', async () => {
-      if (!activeJobId || cancellationRequested) {
-        return;
-      }
-
-      cancellationRequested = true;
-      cancelButton.disabled = true;
-      setStatus('Cancelando', 'Solicitação enviada. Finalizando arquivo atual...', 'Cancelando...');
-
-      try {
-        await requestCancel(activeJobId);
-      } catch (error) {
-        cancellationRequested = false;
-        cancelButton.disabled = false;
-        setStatus('Erro', error.message, 'Falha');
-      }
-    });
+    copyButton.addEventListener('click', copySheetsText);
 
     shutdownButton.addEventListener('click', async () => {
       if (activeJobId) {
@@ -914,62 +1068,41 @@ HTML_PAGE = """<!doctype html>
       event.preventDefault();
       const files = fileInput.files;
       if (!files || !files.length) {
-        setStatus('Seleção vazia', 'Adicione ao menos um PDF ou ZIP para continuar.', 'Atenção');
+        setStatus('Seleção vazia', 'Adicione ao menos uma imagem para continuar.', 'Atenção');
         return;
       }
 
       const formData = new FormData();
-      Array.from(files).forEach((file) => formData.append('files', file));
-
-      const year = document.getElementById('year').value.trim();
-      const ticker = document.getElementById('ticker').value.trim();
-      const sortBy = document.getElementById('sort-by').value;
-      const outputFormat = document.getElementById('output-format').value;
-
-      if (year) formData.append('year', year);
-      if (ticker) formData.append('ticker', ticker);
-      formData.append('sort_by', sortBy);
-      formData.append('output_format', outputFormat);
+      formData.append('file', files[0]);
+      const paymentDate = document.getElementById('payment-date').value.trim();
+      if (paymentDate) {
+        formData.append('payment_date', paymentDate);
+      }
 
       clearPreview();
       resetProgress();
       setLoading(true);
-      setStatus('Processando', 'Preparando arquivos para processamento...', 'Em andamento');
+      setStatus('Processando', 'Executando OCR na imagem...', 'Em andamento');
+      activeJobId = 'image-processing';
+      updateProgress(0, 1);
 
       try {
-        const started = await startProcessing(formData);
-        activeJobId = started.job_id;
-        cancellationRequested = false;
+        const payload = await startProcessingImage(formData);
+        updateProgress(1, 1);
+        results.classList.remove('hidden');
+        metrics.records.textContent = String(payload.records_extracted || 0);
+        metrics.files.textContent = '1';
+        metrics.format.textContent = 'SHEETS';
+        metrics.file.textContent = '-';
 
-        const responsePayload = await pollJobUntilFinished(started.job_id);
-        const payload = responsePayload.result || {};
-
-        if (responsePayload.status === 'cancelled') {
-          setStatus('Interrompido', responsePayload.message || 'Processamento interrompido pelo usuário.', 'Interrompido');
+        renderPreview(payload);
+        lastSheetsText = payload.sheets_text || buildSheetsText(payload);
+        if (lastSheetsText) {
+          sheetsBlock.textContent = lastSheetsText;
+          sheetsBlock.classList.remove('hidden');
         }
 
-        if (responsePayload.status === 'completed') {
-          updateProgress(payload.files_received || 0, payload.files_received || 0, '');
-        }
-
-        if (payload && Object.keys(payload).length) {
-          results.classList.remove('hidden');
-          metrics.records.textContent = String(payload.records_extracted || 0);
-          metrics.files.textContent = String(payload.files_received || 0);
-          metrics.format.textContent = String(payload.export_format || '-').toUpperCase();
-          metrics.file.textContent = payload.filename || '-';
-
-          renderPreview(payload);
-          renderDownload(payload);
-        }
-
-        if (responsePayload.status === 'completed') {
-          const message = payload.message || 'Processamento concluído.';
-          setStatus('Concluído', message, 'Finalizado');
-          if (payload.preview_rows && payload.preview_rows.length) {
-            results.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          }
-        }
+        setStatus('Concluído', payload.message || 'Processamento concluído.', 'Finalizado');
       } catch (error) {
         resetProgress();
         setStatus('Erro', error.message, 'Falha');
@@ -978,13 +1111,12 @@ HTML_PAGE = """<!doctype html>
         results.classList.remove('hidden');
       } finally {
         activeJobId = null;
-        cancellationRequested = false;
         setLoading(false);
       }
     });
 
     refreshFileCount();
-  resetProgress();
+    resetProgress();
   </script>
 </body>
 </html>"""
@@ -1255,6 +1387,23 @@ async def _persist_uploads(files: List[UploadFile], destination: Path) -> None:
 @app.get("/", response_class=HTMLResponse)
 def index() -> HTMLResponse:
     return HTMLResponse(HTML_PAGE)
+
+
+@app.post("/api/process-image")
+async def process_image(
+    file: UploadFile = File(...),
+    payment_date: Optional[str] = Form(default=None),
+):
+    content_type = (file.content_type or "").lower()
+    if not content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Envie um arquivo de imagem.")
+
+    if os.getenv("WEBAPP_E2E_DEMO") == "1":
+        return JSONResponse(content=_build_e2e_demo_image_payload())
+
+    image_bytes = await file.read()
+    content = await run_in_threadpool(_process_image_content, image_bytes, payment_date)
+    return JSONResponse(content=content)
 
 
 @app.post("/api/process")

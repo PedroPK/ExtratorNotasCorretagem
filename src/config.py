@@ -16,7 +16,8 @@ class ConfigManager:
         'output.format': 'xlsx',
         'input.folder': 'resouces/inputNotasCorretagem',
         'output.folder': 'resouces/output',
-        'logs.folder': 'resouces/output/logs'
+        'logs.folder': 'resouces/output/logs',
+        'stats.folder': 'resouces/output/stats'
     }
     
     def __init__(self, config_file='application.properties'):
@@ -80,6 +81,10 @@ class ConfigManager:
     def get_logs_folder(self):
         """Obtém a pasta de logs"""
         return self.get('logs.folder')
+
+    def get_stats_folder(self):
+        """Obtém a pasta de estatísticas por execução"""
+        return self.get('stats.folder')
     
     def get_ticker_mapping(self) -> dict:
         """

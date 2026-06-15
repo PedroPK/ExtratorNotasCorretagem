@@ -8,6 +8,7 @@ import logging
 import signal
 import sys
 import argparse
+import json
 from collections import Counter
 from io import BytesIO
 from datetime import datetime
@@ -20,10 +21,14 @@ config = get_config()
 # Configuração de Logging
 logging_level = config.get_logging_level()
 logs_folder = config.resolve_path(config.get_logs_folder())
+stats_folder = config.resolve_path(config.get_stats_folder())
 
 # Criar pasta de logs se não existir
 if not os.path.exists(logs_folder):
     os.makedirs(logs_folder)
+
+if not os.path.exists(stats_folder):
+    os.makedirs(stats_folder)
 
 # Gera nome do arquivo de log com timestamp
 log_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -99,6 +104,73 @@ def _count_total_pdfs(caminho):
         return 0
     except Exception:
         return 0
+
+
+def _build_execution_stats(caminho: str, year_filter: Optional[int], sort_by: str) -> Dict[str, Any]:
+    started_at = datetime.now()
+    execution_id = started_at.strftime("%Y%m%d_%H%M%S_%f")
+    return {
+        "execution_id": execution_id,
+        "started_at": started_at.isoformat(timespec="seconds"),
+        "finished_at": None,
+        "input_path": caminho,
+        "year_filter": year_filter,
+        "sort_by": sort_by,
+        "status": "running",
+        "totals": {
+            "estimated_pdfs": 0,
+            "processed_files": 0,
+            "failed_files": 0,
+            "ignored_files": 0,
+            "pages_processed": 0,
+            "records_extracted": 0,
+            "elapsed_seconds": 0.0,
+            "avg_seconds_per_pdf": 0.0,
+            "avg_seconds_per_page": 0.0,
+            "avg_records_per_pdf": 0.0,
+            "avg_seconds_per_record": 0.0,
+        },
+        "files": [],
+    }
+
+
+def _round_metric(value: float) -> float:
+    return round(float(value), 4)
+
+
+def _finalize_execution_stats(stats: Dict[str, Any], status: str) -> Dict[str, Any]:
+    finished_at = datetime.now()
+    started_at = datetime.fromisoformat(stats["started_at"])
+    totals = stats["totals"]
+    elapsed_seconds = (finished_at - started_at).total_seconds()
+    processed_files = totals["processed_files"]
+    pages_processed = totals["pages_processed"]
+    records_extracted = totals["records_extracted"]
+
+    totals["elapsed_seconds"] = _round_metric(elapsed_seconds)
+    totals["avg_seconds_per_pdf"] = _round_metric(
+        elapsed_seconds / processed_files if processed_files else 0.0
+    )
+    totals["avg_seconds_per_page"] = _round_metric(
+        elapsed_seconds / pages_processed if pages_processed else 0.0
+    )
+    totals["avg_records_per_pdf"] = _round_metric(
+        records_extracted / processed_files if processed_files else 0.0
+    )
+    totals["avg_seconds_per_record"] = _round_metric(
+        elapsed_seconds / records_extracted if records_extracted else 0.0
+    )
+
+    stats["status"] = status
+    stats["finished_at"] = finished_at.isoformat(timespec="seconds")
+    return stats
+
+
+def _write_execution_stats(stats: Dict[str, Any]) -> str:
+    stats_path = os.path.join(stats_folder, f"execucao_{stats['execution_id']}.json")
+    with open(stats_path, "w", encoding="utf-8") as stats_file:
+        json.dump(stats, stats_file, ensure_ascii=False, indent=2)
+    return stats_path
 
 
 # 1. Dicionário De-Para para mapear nomes de ativos para Tickers
@@ -606,7 +678,7 @@ def _filter_dataframe_by_ticker(df: pd.DataFrame, target_ticker: Optional[str]) 
     return filtered
 
 
-def processar_pdf(pdf_file, senha=None):
+def processar_pdf(pdf_file, senha=None, metrics_collector: Optional[List[Dict[str, Any]]] = None):
     dados_extraidos = []
 
     # Carrega mapeamento de tickers do arquivo de configuração
@@ -623,6 +695,17 @@ def processar_pdf(pdf_file, senha=None):
         _inicio_processamento = datetime.now()
         logger.info(f"📄 Processando arquivo: {arquivo_nome}")
         sys.stderr.flush()
+        file_metrics: Dict[str, Any] = {
+            "file_name": arquivo_nome,
+            "status": "running",
+            "page_count": 0,
+            "records_extracted": 0,
+            "elapsed_seconds": 0.0,
+            "avg_seconds_per_page": 0.0,
+            "avg_seconds_per_record": 0.0,
+            "pages": [],
+            "error": None,
+        }
 
         # Tenta abrir com senha se fornecida
         try:
@@ -647,9 +730,11 @@ def processar_pdf(pdf_file, senha=None):
 
         with pdf:
             total_paginas = len(pdf.pages)
+            file_metrics["page_count"] = total_paginas
             logger.debug(f"   Total de páginas: {total_paginas}")
 
             for num_pagina, page in enumerate(pdf.pages, 1):
+                page_started_at = datetime.now()
                 try:
                     # Extração da Data (procura por "Data pregão") [3, 8, 9]
                     texto_topo = page.extract_text()
@@ -856,24 +941,61 @@ def processar_pdf(pdf_file, senha=None):
                             f"   ✓ Página {num_pagina}/{total_paginas}: {registros_pagina} registro(s) extraído(s)"
                         )
 
+                    page_elapsed = (datetime.now() - page_started_at).total_seconds()
+                    file_metrics["pages"].append(
+                        {
+                            "page_number": num_pagina,
+                            "records_extracted": registros_pagina,
+                            "elapsed_seconds": _round_metric(page_elapsed),
+                        }
+                    )
+
                 except Exception as e:
                     logger.error(f"   ✗ Erro ao processar página {num_pagina}: {str(e)}")
+                    page_elapsed = (datetime.now() - page_started_at).total_seconds()
+                    file_metrics["pages"].append(
+                        {
+                            "page_number": num_pagina,
+                            "records_extracted": 0,
+                            "elapsed_seconds": _round_metric(page_elapsed),
+                            "error": str(e),
+                        }
+                    )
                     continue
 
         total_registros = len(dados_extraidos)
         _tempo_processamento = (datetime.now() - _inicio_processamento).total_seconds()
+        file_metrics["records_extracted"] = total_registros
+        file_metrics["elapsed_seconds"] = _round_metric(_tempo_processamento)
+        file_metrics["avg_seconds_per_page"] = _round_metric(
+            _tempo_processamento / total_paginas if total_paginas else 0.0
+        )
+        file_metrics["avg_seconds_per_record"] = _round_metric(
+            _tempo_processamento / total_registros if total_registros else 0.0
+        )
         if total_registros > 0:
+            file_metrics["status"] = "success"
             logger.info(f"✓ {arquivo_nome}: {total_registros} registro(s) extraído(s) com sucesso [{_format_elapsed(_tempo_processamento)}]")
         else:
+            file_metrics["status"] = "warning"
             logger.warning(f"⚠️  {arquivo_nome}: Nenhum registro extraído [{_format_elapsed(_tempo_processamento)}]")
         sys.stderr.flush()
 
     except FileNotFoundError:
         _tempo_processamento = (datetime.now() - _inicio_processamento).total_seconds()
+        file_metrics["status"] = "file_not_found"
+        file_metrics["error"] = "Arquivo não encontrado"
+        file_metrics["elapsed_seconds"] = _round_metric(_tempo_processamento)
         logger.error(f"✗ Arquivo não encontrado: {arquivo_nome} [{_format_elapsed(_tempo_processamento)}]")
     except Exception as e:
         _tempo_processamento = (datetime.now() - _inicio_processamento).total_seconds()
+        file_metrics["status"] = "error"
+        file_metrics["error"] = str(e)
+        file_metrics["elapsed_seconds"] = _round_metric(_tempo_processamento)
         logger.error(f"✗ Erro ao processar {arquivo_nome}: {str(e)} [{_format_elapsed(_tempo_processamento)}]")
+
+    if metrics_collector is not None:
+        metrics_collector.append(file_metrics)
 
     return dados_extraidos
 
@@ -884,12 +1006,14 @@ def analisar_pasta_ou_zip(
     sort_by: str = "name",
     progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
     should_stop: Optional[Callable[[], bool]] = None,
+    stats_output_path: Optional[List[str]] = None,
 ):
     todos_dados = []
     arquivos_processados = 0
     arquivos_erro = 0
     arquivos_ignorados = 0
     _inicio_total = datetime.now()
+    execution_stats = _build_execution_stats(caminho, year_filter, sort_by)
 
     try:
         logger.info("=" * 60)
@@ -910,6 +1034,7 @@ def analisar_pasta_ou_zip(
             return pd.DataFrame()
 
         total_arquivos = _count_total_pdfs(caminho)
+        execution_stats["totals"]["estimated_pdfs"] = total_arquivos
         logger.info(f"📥 Total estimado de PDFs para processar: {total_arquivos}")
 
         if total_arquivos == 0:
@@ -1035,13 +1160,29 @@ def analisar_pasta_ou_zip(
 
                 if tarefa["type"] == "file":
                     try:
-                        dados = processar_pdf(tarefa["path"])
+                        file_metrics: List[Dict[str, Any]] = []
+                        dados = processar_pdf(tarefa["path"], metrics_collector=file_metrics)
                         todos_dados.extend(dados)
                         arquivos_processados += 1
+                        if file_metrics:
+                            execution_stats["files"].append(file_metrics[0])
                         _notify_progress(current_file, "processed")
                     except Exception as e:
                         logger.error(f"✗ Erro ao processar {tarefa['path']}: {str(e)}")
                         arquivos_erro += 1
+                        execution_stats["files"].append(
+                            {
+                                "file_name": current_file,
+                                "status": "error",
+                                "page_count": 0,
+                                "records_extracted": 0,
+                                "elapsed_seconds": 0.0,
+                                "avg_seconds_per_page": 0.0,
+                                "avg_seconds_per_record": 0.0,
+                                "pages": [],
+                                "error": str(e),
+                            }
+                        )
                         _notify_progress(current_file, "error")
 
                 elif tarefa["type"] == "zip_entry":
@@ -1051,15 +1192,31 @@ def analisar_pasta_ou_zip(
                                 bio = criar_bytesio_com_nome(
                                     f.read(), os.path.basename(tarefa["name"])
                                 )
-                                dados = processar_pdf(bio)
+                                file_metrics = []
+                                dados = processar_pdf(bio, metrics_collector=file_metrics)
                                 todos_dados.extend(dados)
                                 arquivos_processados += 1
+                                if file_metrics:
+                                    execution_stats["files"].append(file_metrics[0])
                                 _notify_progress(current_file, "processed")
                     except Exception as e:
                         logger.error(
                             f"✗ Erro ao processar {tarefa['name']} do ZIP {os.path.basename(tarefa['zip'])}: {str(e)}"
                         )
                         arquivos_erro += 1
+                        execution_stats["files"].append(
+                            {
+                                "file_name": current_file,
+                                "status": "error",
+                                "page_count": 0,
+                                "records_extracted": 0,
+                                "elapsed_seconds": 0.0,
+                                "avg_seconds_per_page": 0.0,
+                                "avg_seconds_per_record": 0.0,
+                                "pages": [],
+                                "error": str(e),
+                            }
+                        )
                         _notify_progress(current_file, "error")
 
         except KeyboardInterrupt:
@@ -1082,6 +1239,22 @@ def analisar_pasta_ou_zip(
         logger.info(f"⏱️  Tempo total de processamento: {_format_elapsed(_tempo_total)}")
         logger.info("=" * 60)
 
+        execution_stats["totals"]["processed_files"] = arquivos_processados
+        execution_stats["totals"]["failed_files"] = arquivos_erro
+        execution_stats["totals"]["ignored_files"] = arquivos_ignorados
+        execution_stats["totals"]["pages_processed"] = sum(
+            int(file_stat.get("page_count") or 0) for file_stat in execution_stats["files"]
+        )
+        execution_stats["totals"]["records_extracted"] = len(todos_dados)
+        execution_stats = _finalize_execution_stats(
+            execution_stats,
+            "cancelled" if stop_processing else "completed",
+        )
+        stats_path = _write_execution_stats(execution_stats)
+        logger.info(f"🧾 Estatísticas da execução salvas em: {stats_path}")
+        if stats_output_path is not None:
+            stats_output_path.append(stats_path)
+
         if tarefas:
             _notify_progress("", "finished")
 
@@ -1090,6 +1263,19 @@ def analisar_pasta_ou_zip(
 
     except Exception as e:
         logger.error(f"✗ Erro inesperado durante o processamento: {str(e)}")
+        execution_stats["totals"]["processed_files"] = arquivos_processados
+        execution_stats["totals"]["failed_files"] = arquivos_erro + 1
+        execution_stats["totals"]["ignored_files"] = arquivos_ignorados
+        execution_stats["totals"]["pages_processed"] = sum(
+            int(file_stat.get("page_count") or 0) for file_stat in execution_stats["files"]
+        )
+        execution_stats["totals"]["records_extracted"] = len(todos_dados)
+        execution_stats["error"] = str(e)
+        execution_stats = _finalize_execution_stats(execution_stats, "failed")
+        stats_path = _write_execution_stats(execution_stats)
+        logger.info(f"🧾 Estatísticas da execução salvas em: {stats_path}")
+        if stats_output_path is not None:
+            stats_output_path.append(stats_path)
         logger.info("=" * 60)
         return pd.DataFrame()
 

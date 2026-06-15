@@ -4,6 +4,93 @@ Este arquivo concentra as notas de correções e histórico de versões do proje
 
 ## 🔧 Correções Recentes
 
+### v1.6.0 (15/06/2026) - Robustez do Parsing OCR de Dividendos
+
+**Objetivo:** Corrigir extração que retornava 0 registros ao processar imagens reais de extratos,
+onde o OCR quebra cada entrada em múltiplas linhas independentes.
+
+**Problema raiz:** O parser anterior exigia que Ticker, Quantidade e Valor Recebido estivessem
+na mesma linha de texto — o que nunca ocorre em imagens reais, onde o OCR (ocrmac) retorna cada
+fragmento de bounding box como uma linha separada. Exemplo:
+
+```
+RENDIMENTOS DE          →  linha 1
+CLIENTES KNCR11 S/      →  linha 2
+R$ 286,00               →  linha 3
+260                     →  linha 4
+```
+
+**Novidades:**
+- ✅ Parser reescrito com **janela deslizante multi-linha**: ao detectar uma linha com
+  `REND`/`DIVID`/`JCP`, coleta até 5 linhas seguintes e agrupa como uma única entrada
+- ✅ Extração de quantidade com três níveis de fallback:
+  1. Padrão `S/ <dígito>` — ex: `KNCR11 S/ 260` (mesmo que divididos em linhas)
+  2. Número imediatamente antes de `R$` — compatível com formato de linha única legado
+  3. Número isolado em linha própria — ex: `"260"` sem outros caracteres
+- ✅ **Quantidades como inteiros**: removidas casas decimais (cotas no Brasil são sempre inteiras)
+- ✅ **Vírgula como separador de milhar americano na quantidade**: `"2,575"` → `2575`
+- ✅ **Vírgula como separador decimal no Valor Recebido**: `286.00` → `286,00` (padrão BR)
+- ✅ Nova função `_normalize_qty()` dedicada ao tratamento de quantidades
+- ✅ Testes atualizados: novo caso `test_process_image_multiline_ocr` cobre o cenário real
+  da imagem com 3 entradas em múltiplas linhas, incluindo `2,575` como milhar
+
+**Antes / Depois:**
+
+| Campo | Antes | Depois |
+|-------|-------|--------|
+| Quantidade | `260.0000` | `260` |
+| Quantidade com milhar | `2.5750` | `2575` |
+| Valor Recebido | `286.00` | `286,00` |
+| Registros extraídos (imagem real) | `0` | `5` ✅ |
+
+**Arquivos impactados:**
+- `src/webapp.py`
+- `tests/test_webapp.py`
+
+**Impacto:**
+- Funcionalidade de Processar Imagem agora extrai corretamente registros de extratos reais
+- Sem quebra de compatibilidade com outros fluxos (PDF, CLI)
+
+---
+
+### v1.5.0 (09/06/2026) - Extrato de Dividendos por Imagem + Saída para Google Sheets
+
+**Objetivo:** Adaptar a interface web para análise de imagem de extrato de dividendos com OCR e saída tabulada para colar no Google Sheets.
+
+**Novidades:**
+- ✅ Novo endpoint `POST /api/process-image` para processar upload de imagem
+- ✅ OCR com Tesseract (`pytesseract` + `Pillow`) no backend
+- ✅ Parsing de linhas de dividendos com extração de:
+  - Data
+  - Ticker
+  - Tipo (`D`)
+  - Quantidade de Cotas
+  - Valor Recebido
+- ✅ Frontend atualizado para fluxo de imagem:
+  - seleção de arquivo
+  - drag and drop
+  - colagem via Ctrl/Cmd+V
+- ✅ Botão **Copiar para Google Sheets** com texto tabulado
+- ✅ Modo demo E2E via `WEBAPP_E2E_DEMO=1`
+- ✅ Ajuste do E2E Playwright para esperar estado determinístico da UI
+- ✅ Documentação atualizada com forma de execução do OCR/Tesseract e novo fluxo
+
+**Arquivos impactados:**
+- `src/webapp.py`
+- `resouces/requirements.txt`
+- `tests/test_webapp.py`
+- `tests/e2e/test_webapp_e2e.py`
+- `README.md`
+- `docs/QUICKSTART.md`
+- `docs/RELEASE_NOTES.md`
+
+**Impacto:**
+- Fluxo focado em extrato de dividendos por imagem
+- Saída pronta para planilha sem download de arquivo intermediário
+- Cobertura de testes preservada (unitários + E2E)
+
+---
+
 ### v1.4.1 (14/05/2026) - Autoabertura do Frontend + Encerramento pela Interface
 
 **Objetivo:** Melhorar a experiência de uso da interface web, automatizando a abertura da URL e oferecendo encerramento rápido do servidor para liberar recursos da máquina.
@@ -489,6 +576,9 @@ Outros exemplos corrigidos anteriormente: ELETROBRAS (ON→ELET3 vs PNB→ELET4)
 
 | Versão | Data | Mudança Principal |
 |--------|------|---|
+| 1.6.0 | 15/06/2026 | Parsing OCR multi-linha, quantidades inteiras, formato decimal BR |
+| 1.5.0 | 09/06/2026 | Extração de dividendos por imagem (OCR) + saída para Google Sheets |
+| 1.4.1 | 14/05/2026 | Autoabertura + encerramento pela interface web |
 | 1.4.0 | 13/05/2026 | Barra de progresso por arquivo na interface web |
 | 1.1.7 | 20/02/2026 | Formatação decimal com vírgula (padrão brasileiro) |
 | 1.1.6 | 20/02/2026 | Prioridade correta em mapeamento de tickers |

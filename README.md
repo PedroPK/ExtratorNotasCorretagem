@@ -33,25 +33,29 @@ Com esses dados extraidos, posso alimentar a planilha de controle original.
 - **Frontend web com drag and drop** para PDFs e ZIPs
 - **Estrutura organizada** com configurações em `resouces/`
 
-## 🌐 Frontend Web
+## 🌐 Frontend Web (Extrato de Dividendos por Imagem)
 
-Agora a aplicação também pode ser usada pelo navegador. O usuário faz upload de PDFs ou ZIPs,
-acompanha o processamento e, ao final, pode baixar o arquivo exportado ou visualizar os dados
-extraídos diretamente na tela.
+A aplicação pode ser usada no navegador para extrair dividendos a partir de imagem do extrato.
+O fluxo permite selecionar arquivo, arrastar e soltar, ou colar com **Ctrl/Cmd+V**.
+
+### Execução
 
 ```bash
-# Instale as dependências adicionais, se necessário
+# 1) Ambiente virtual
+python3 -m venv .venv
+source .venv/bin/activate
+
+# 2) Dependências Python
 pip install -r resouces/requirements.txt
 
-# Inicie a interface web
+# 3) Iniciar interface web
 python3 src/webapp.py
 ```
 
 A URL `http://localhost:8000` é aberta automaticamente no navegador (padrão).
-Se quiser desabilitar isso, use `python3 src/webapp.py --no-open-browser`.
+Para desabilitar a abertura automática, use `python3 src/webapp.py --no-open-browser`.
 
-Na própria tela existe o botão **Encerrar aplicação**, que finaliza o servidor e tenta
-fechar a janela para liberar recursos do computador.
+Na tela existe o botão **Encerrar aplicação**, que finaliza o servidor para liberar recursos da máquina.
 
 ### 🖼️ Interface Web (prints)
 
@@ -67,17 +71,18 @@ fechar a janela para liberar recursos do computador.
 
 ![Barra de progresso durante o processamento](docs/img/webapp_progress.png)
 
-#### Preview dos dados extraídos e do arquivo pronto para download
+#### Preview dos dados extraídos
 
-![Preview dos dados extraídos](docs/img/webapp_preview_download.png)
+![Preview dos dados extraídos](docs/img/webapp_preview.png)
+
+#### Texto tabulado pronto para colar no Google Sheets
+
+![Texto tabulado para Google Sheets](docs/img/webapp_sheets.png)
 
 #### Captura automática dos prints com Playwright
 
 ```bash
-# 1) Em um terminal, inicie a aplicação web
-python3 src/webapp.py
-
-# 2) Em outro terminal, execute o teste E2E
+# Executar captura E2E (o teste sobe o servidor automaticamente em modo demo)
 python3 tests/e2e/test_webapp_e2e.py
 ```
 

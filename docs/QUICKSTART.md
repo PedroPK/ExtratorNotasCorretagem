@@ -130,16 +130,12 @@ pytest tests/ -v --ignore=tests/e2e
 ### Testes E2E com Playwright (interface web)
 
 ```bash
-# 1) Inicie a aplicação em um terminal
-python3 src/webapp.py
-
-# 2) Em outro terminal, execute o teste E2E
 python3 tests/e2e/test_webapp_e2e.py
 ```
 
 > O E2E sobe o servidor automaticamente na porta 8010, captura prints e os salva em `docs/img/`.
 
-## 6.2) Frontend Web + prints com Playwright
+## 6.2) Frontend Web (extrato de dividendos por imagem)
 
 ### Executar interface web
 
@@ -150,9 +146,17 @@ python3 src/webapp.py
 A URL `http://localhost:8000` é aberta automaticamente no navegador. Para desabilitar,
 execute com `--no-open-browser`.
 
-Durante o processamento, uma **barra de progresso** exibe o percentual concluído e o nome
-do arquivo em processamento no momento. Ao finalizar o uso, clique em **Encerrar aplicação**
-na interface para desligar o servidor e liberar recursos computacionais.
+Para OCR local, a aplicação utiliza `ocrmac` (OCR nativo do macOS), incluído automaticamente via `pip install -r resouces/requirements.txt`. Não é necessária nenhuma instalação adicional.
+
+### Fluxo de uso
+
+- Selecione uma imagem do extrato ou arraste/solte no dropzone
+- Também é possível colar com **Ctrl/Cmd+V**
+- (Opcional) informe a data de recebimento
+- Clique em **Processar imagem**
+- Use **Copiar para Google Sheets** para copiar o texto tabulado
+
+Ao finalizar o uso, clique em **Encerrar aplicação** na interface para desligar o servidor e liberar recursos computacionais.
 
 ### Gerar prints automaticamente (E2E)
 
@@ -169,7 +173,7 @@ O script salva os prints em `docs/img/`:
 - `webapp_upload.png`
 - `webapp_upload_selected.png`
 - `webapp_preview.png`
-- `webapp_download.png`
+- `webapp_sheets.png`
 - `webapp_progress.png` *(barra de progresso durante extração)*
 
 ## 7) Troubleshooting rápido

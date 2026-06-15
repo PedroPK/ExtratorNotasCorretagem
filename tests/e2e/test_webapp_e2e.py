@@ -39,21 +39,23 @@ def _wait_for_server(url: str, timeout: float = 20.0) -> None:
     raise RuntimeError(f"Servidor não respondeu em {url} dentro do timeout.")
 
 
-def _create_sample_pdf() -> str:
-    """Cria um PDF simples de exemplo para upload no cenário E2E."""
-    pdf_path = FIXTURES_DIR / "e2e_sample.pdf"
-    if not pdf_path.exists():
-        with open(pdf_path, "wb") as f:
-            f.write(
-                b"%PDF-1.4\n"
-                b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"
-                b"2 0 obj\n<< /Type /Pages /Count 1 /Kids [3 0 R] >>\nendobj\n"
-                b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >>\nendobj\n"
-                b"4 0 obj\n<< /Length 62 >>\nstream\nBT\n/F1 12 Tf\n72 720 Td\n(Extrator Notas Corretagem - E2E Sample) Tj\nET\nendstream\nendobj\n"
-                b"xref\n0 5\n0000000000 65535 f \n0000000010 00000 n \n0000000062 00000 n \n0000000120 00000 n \n0000000221 00000 n \n"
-                b"trailer\n<< /Root 1 0 R /Size 5 >>\nstartxref\n343\n%%EOF"
-            )
-    return str(pdf_path)
+def _create_sample_image() -> str:
+    image_path = FIXTURES_DIR / "e2e_sample.png"
+    if image_path.exists():
+        return str(image_path)
+
+    try:
+        from PIL import Image
+    except ImportError:
+        image_path.write_bytes(
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0bIDATx\x9cc``\x00\x00\x00\x03\x00\x01h&Y\r\x00\x00\x00\x00IEND\xaeB`\x82"
+        )
+        return str(image_path)
+
+    image = Image.new("RGB", (1200, 700), "white")
+    image.save(image_path, format="PNG")
+    return str(image_path)
+
 
 
 def _start_server() -> subprocess.Popen:
@@ -100,27 +102,23 @@ def test_webapp_e2e():
             page.wait_for_selector("#upload-form")
             page.screenshot(path=str(IMG_DIR / "webapp_upload.png"), full_page=True)
 
-            # Faz upload do PDF de exemplo
-            page.set_input_files("input[type=file]", _create_sample_pdf())
+            # Faz upload da imagem de exemplo
+            page.set_input_files("#files", _create_sample_image())
             page.screenshot(path=str(IMG_DIR / "webapp_upload_selected.png"), full_page=True)
 
             # Processa e aguarda o preview
             page.click("#process-button")
-            page.wait_for_function(
-                "() => document.getElementById('status-message')?.textContent?.includes('Processando arquivo:')",
-                timeout=15000,
-            )
-            page.locator("#progress-wrap").scroll_into_view_if_needed()
-            page.screenshot(path=str(IMG_DIR / "webapp_progress.png"), full_page=True)
             page.wait_for_selector("#results:not(.hidden)", timeout=15000)
             page.wait_for_selector("#preview-table tbody tr", timeout=15000)
+            page.locator("#progress-wrap").scroll_into_view_if_needed()
+            page.screenshot(path=str(IMG_DIR / "webapp_progress.png"), full_page=True)
             page.locator("#results").scroll_into_view_if_needed()
             page.screenshot(path=str(IMG_DIR / "webapp_preview.png"), full_page=True)
 
-            # Captura estado com download disponível
-            page.wait_for_selector("#download-slot a", timeout=15000)
-            page.locator("#download-slot").scroll_into_view_if_needed()
-            page.screenshot(path=str(IMG_DIR / "webapp_download.png"), full_page=True)
+            # Captura estado com texto pronto para copiar no Sheets
+            page.wait_for_selector("#sheets-block:not(.hidden)", timeout=15000)
+            page.locator("#sheets-block").scroll_into_view_if_needed()
+            page.screenshot(path=str(IMG_DIR / "webapp_sheets.png"), full_page=True)
 
             browser.close()
     finally:
